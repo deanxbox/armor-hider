@@ -55,6 +55,11 @@ with(sc) {
     // jar ships only the legacy GenderLayer API.
     constants["gender"] = hasProperty("gender.version") && findProperty("gender_legacy_api") != "true"
     constants["gender_legacy"] = hasProperty("gender.version") && findProperty("gender_legacy_api") == "true"
+    // First Person Model (tr7zw) renders the local player's body in first person, so layers we hook
+    // (head, wings, held item) submit for the camera entity — and FPM cancels several of them at
+    // their submit HEAD. `firstperson` compiles the typed guard that keeps our render scopes from
+    // leaking past those cancels. Fabric-only: the property is pinned on fabric variants only.
+    constants["firstperson"] = hasProperty("firstperson.version")
     // `fcgt` activates the Phase 2 smoke test (fabric-client-gametest-api-v1) — true on
     // Fabric variants that pin `fabricapi.semver` so the FCGT module classpath wiring,
     // entrypoint, run task and stonecutter-gated test class line up consistently.
@@ -126,6 +131,12 @@ if (branch == "common") {
         }
         if (hasProperty("gender.version")) {
             add(modClientDep, "maven.modrinth:female-gender:${findProperty("gender.version")}")
+        }
+        // Fabric-only. Declared here for the remapped common compile; the loader project compiles common's
+        // sources too, so multiloader-loader.gradle.kts declares the same coordinate unremapped. That pairing
+        // only works because FirstPersonCompat avoids every FPM member whose signature names a Minecraft type.
+        if (hasProperty("firstperson.version")) {
+            add(modClientDep, "maven.modrinth:first-person-model:${findProperty("firstperson.version")}")
         }
         // Phase 2 smoke: FCGT (fabric-client-gametest-api-v1) compile-time dep on common.
         if (sc.current.project.contains("fabric") && hasProperty("fabricapi.semver")) {
@@ -269,6 +280,11 @@ if (branch == "fabric") {
             // (pulled in on the gender smoke row) and the after-terrain render architecture, so it
             // shares WaterTransparency's floor. Class is stonecutter-gated to the same range.
             add("de.zannagh.armorhider.smoke.GenderBreastArmorSmokeTest")
+        }
+        // First Person Model compat smoke. Guard must stay identical to the test class's own
+        // `//? if fcgt && firstperson {` gate, or fabric-loader tries to resolve a commented-out class.
+        if (hasProperty("firstperson.version")) {
+            add("de.zannagh.armorhider.smoke.FirstPersonSmokeTest")
         }
     }
     val fcgtEntries = if (hasProperty("fabricapi.semver"))

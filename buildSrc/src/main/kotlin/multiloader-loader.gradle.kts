@@ -11,7 +11,7 @@ sc.constants["neoforge"] = sc.current.project.contains("neoforge")
 val compatKeys = listOf(
     "fabricapi",
     "gender", "geckolib", "waveycapes", "mekanism", "figura",
-    "elytratrims", "iris", "emf", "etf", "modmenu", "deeperdarker", "uranus"
+    "elytratrims", "iris", "emf", "etf", "modmenu", "deeperdarker", "uranus", "firstperson"
 )
 val availableHashes = compatKeys.mapNotNull { key ->
     findProperty("$key.version")?.toString()?.let { hash -> key to hash }
@@ -106,6 +106,13 @@ dependencies {
     }
     if (hasProperty("gender.version")) {
         add("compileOnly", "maven.modrinth:female-gender:${findProperty("gender.version")}")
+    }
+    // First Person Model is Fabric-only, but the loader project compiles common's sources too, so the
+    // unremapped jar has to be here as well. That is usable only because FirstPersonCompat never touches an
+    // FPM member whose signature names a Minecraft type — FPM's own types (LogicHandler and friends) are
+    // fine, since those resolve identically either way; it is the MC types that differ between namespaces.
+    if (hasProperty("firstperson.version")) {
+        add("compileOnly", "maven.modrinth:first-person-model:${findProperty("firstperson.version")}")
     }
 }
 
