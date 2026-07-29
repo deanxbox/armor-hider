@@ -24,12 +24,19 @@ concurrency:
 
 env:
   MODRINTH_PROJECT_ID: 'zannaghs-armor-hider'
+  # "Armor Hider" in the Minecraft > Mods section (classId 6): the Fabric/NeoForge mod.
   CURSEFORGE_PROJECT_ID: '1475841'
+  # "Armor Hider - Plugin" in the Minecraft > Bukkit Plugins section (classId 5), i.e.
+  # curseforge.com/minecraft/bukkit-plugins/armor-hider-plugin. CurseForge cannot mix
+  # sections within one project, so the Paper plugin needs its own project ID - but it
+  # is the SAME site and the SAME upload API as the mod project (see publish-curseforge-bukkit).
+  CURSEFORGE_BUKKIT_PROJECT_ID: '1629731'
   # Hangar project slug (the last path segment of hangar.papermc.io/<owner>/<slug>).
   HANGAR_PROJECT_SLUG: 'armor-hider'
   # Set to 'true' to enable actual publishing, 'false' for dry-run
   PUBLISH_TO_MODRINTH: 'true'
   PUBLISH_TO_CURSEFORGE: 'true'
+  PUBLISH_TO_CURSEFORGE_BUKKIT: 'true'
   PUBLISH_TO_HANGAR: 'true'
 
 jobs:
@@ -403,13 +410,13 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.build.outputs.supported_versions) }}
     steps:
-      # CurseForge files Bukkit/Paper plugins under a separate game section that is not
-      # reachable from this (Minecraft mod) project, so the Paper artifact is skipped
-      # here rather than failing the job. Note: job-level `if:` cannot read `matrix`,
-      # hence the per-step guards.
+      # CurseForge files Bukkit plugins under a different game section than mods, and a
+      # project lives in exactly one section - so the Paper artifact is skipped here and
+      # uploaded by publish-curseforge-bukkit to its own project instead. Note: job-level
+      # `if:` cannot read `matrix`, hence the per-step guards.
       - name: Skip Paper artifact
         if: matrix.loader == 'paper'
-        run: echo "Skipping CurseForge upload for the Paper plugin (published to Hangar + Modrinth instead)."
+        run: echo "Skipping CurseForge mod-project upload for the Paper plugin (handled by publish-curseforge-bukkit)."
 
       - name: Checkout
         if: matrix.loader != 'paper'
@@ -496,6 +503,128 @@ jobs:
           retry-delay: 10000
           # Warn (don't fail) when CurseForge lacks a game version, e.g. brand-new
           # snapshots CF hasn't added yet. Re-publish once CF catches up.
+          curseforge-fail-mode: warn
+
+  # ============================================================================
+  # PUBLISH TO CURSEFORGE - BUKKIT PLUGINS SECTION (Paper plugin only)
+  # ============================================================================
+  # Untangling the dev.bukkit.org / CurseForge confusion, because it matters here:
+  #
+  #   dev.bukkit.org, bukkit.curseforge.com, minecraft.curseforge.com and
+  #   legacy.curseforge.com are all skins over ONE CurseForge backend. BukkitDev is
+  #   not a separate site any more - creating a project there just creates a
+  #   CurseForge project in the Minecraft > "Bukkit Plugins" section (classId 5)
+  #   instead of the "Mods" section (classId 6). Same account, same author panel,
+  #   same account-wide API token from legacy.curseforge.com/account/api-tokens,
+  #   same upload endpoint - `POST <host>/api/projects/<id>/upload-file` behaves
+  #   identically no matter which of those hosts you send it to.
+  #
+  # What *is* different is the game-version taxonomy: Bukkit versions live under
+  # gameVersionTypeID 1, and their IDs differ from the mod versions with the same
+  # name (there is a "1.21.4" under both). mc-publish handles this: when it resolves
+  # no mod loaders it tries the Bukkit-plugin version IDs first and falls back to the
+  # other variants. That is why this job deliberately passes NO `loaders:` input -
+  # supplying one would push it back onto the Mods ID variant and the upload would be
+  # rejected with an invalid-game-version error.
+  #
+  # Not matrixed: the Paper plugin is a single version-agnostic jar, so one upload.
+  publish-curseforge-bukkit:
+    name: Publish to CurseForge (Bukkit Plugins)
+    runs-on: ubuntu-latest
+    needs: [analyze, build, changelog]
+    if: |
+      needs.analyze.outputs.should_release == 'true' &&
+      needs.analyze.outputs.is_manual_release == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: armor-hider-${{ needs.build.outputs.mod_version }}
+          path: artifacts
+
+      - name: Get game versions
+        id: game-versions
+        run: |
+          set -euo pipefail
+          VERSIONS=$(jq -r '.paper.paper[]?' artifacts/versions.json)
+          if [[ -z "$VERSIONS" ]]; then
+            echo "::error::versions.json has no .paper.paper entry - stageArtifacts did not stage the Paper jar."
+            exit 1
+          fi
+          echo "list<<EOF" >> $GITHUB_OUTPUT
+          echo "$VERSIONS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Prepare CurseForge Upload
+        id: curseforge
+        uses: ./.github/actions/prepare-modrinth-upload
+        with:
+          display-version: paper
+          mod-version: ${{ needs.build.outputs.mod_version }}
+          is-prerelease: ${{ needs.build.outputs.is_prerelease }}
+          artifact-path: artifacts
+          loader: paper
+
+      - name: Preview CurseForge (Bukkit) Upload
+        if: steps.curseforge.outputs.found == 'true'
+        env:
+          CHANGELOG: ${{ needs.changelog.outputs.user-facing }}
+          GAME_VERSIONS: ${{ steps.game-versions.outputs.list }}
+        run: |
+          echo "=========================================="
+          echo "CURSEFORGE (BUKKIT PLUGINS) UPLOAD PREVIEW"
+          echo "=========================================="
+          echo ""
+          echo "File: ${{ steps.curseforge.outputs.jar_path }}"
+          echo ""
+          echo "Version Details:"
+          echo "  Project ID:    ${{ env.CURSEFORGE_BUKKIT_PROJECT_ID }} (Minecraft > Bukkit Plugins)"
+          echo "  Version:       ${{ steps.curseforge.outputs.version_number }}"
+          echo "  Display Name:  ${{ steps.curseforge.outputs.version_name }}"
+          echo "  Version Type:  ${{ steps.curseforge.outputs.version_type }}"
+          echo "  Loader:        (none - Bukkit Plugins projects have no loader tags)"
+          echo "  Game Versions:"
+          printf '    %s\n' $GAME_VERSIONS
+          echo ""
+          echo "Changelog:"
+          echo "---"
+          printf '%s\n' "$CHANGELOG"
+          echo "---"
+          echo ""
+          if [[ "${{ inputs.dry_run }}" != "false" ]]; then
+            echo "DRY RUN - Skipping actual CurseForge upload"
+          elif [[ "${{ env.PUBLISH_TO_CURSEFORGE_BUKKIT }}" == "true" ]]; then
+            echo "PUBLISH_TO_CURSEFORGE_BUKKIT=true - Will publish to CurseForge"
+          else
+            echo "PUBLISH_TO_CURSEFORGE_BUKKIT=false - Publishing disabled"
+          fi
+          echo "=========================================="
+
+      - name: Publish to CurseForge (Bukkit Plugins)
+        if: ${{ steps.curseforge.outputs.found == 'true' && env.PUBLISH_TO_CURSEFORGE_BUKKIT == 'true' && !inputs.dry_run }}
+        uses: Kira-NT/mc-publish@52307b03863581dec6b652b83e597aec02ebb075 # v3.3
+        with:
+          curseforge-id: ${{ env.CURSEFORGE_BUKKIT_PROJECT_ID }}
+          # The CurseForge API token is account-wide, so the same CURSEFORGE_TOKEN used for
+          # the mod project also covers this one - prefer it, and fall back to
+          # CURSEFORGE_BUKKIT_TOKEN only if it is ever unset.
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN || secrets.CURSEFORGE_BUKKIT_TOKEN }}
+          files: ${{ steps.curseforge.outputs.jar_path }}
+          name: ${{ steps.curseforge.outputs.version_name }}
+          version: ${{ steps.curseforge.outputs.version_number }}
+          version-type: ${{ steps.curseforge.outputs.version_type }}
+          # No `loaders:` on purpose - see the block comment above this job.
+          game-versions: |
+            ${{ steps.game-versions.outputs.list }}
+          game-version-filter: any
+          changelog: ${{ needs.changelog.outputs.user-facing }}
+          retry-attempts: 2
+          retry-delay: 10000
+          # The Bukkit version list is sparser and lags behind the Minecraft one, so warn
+          # (don't fail) on versions CurseForge has not added yet.
           curseforge-fail-mode: warn
 
   # ============================================================================
@@ -721,7 +850,7 @@ jobs:
   summary:
     name: Workflow Summary
     runs-on: ubuntu-latest
-    needs: [analyze, validate-version, check-modrinth, build, changelog, create-prerelease, upload-to-release, publish-modrinth, publish-curseforge, publish-hangar]
+    needs: [analyze, validate-version, check-modrinth, build, changelog, create-prerelease, upload-to-release, publish-modrinth, publish-curseforge, publish-curseforge-bukkit, publish-hangar]
     if: always()
     steps:
       - name: Download Artifacts
@@ -754,6 +883,7 @@ jobs:
             Upload to Release=${{ needs.upload-to-release.result }}
             Publish to Modrinth=${{ needs.publish-modrinth.result }}
             Publish to CurseForge=${{ needs.publish-curseforge.result }}
+            Publish to CurseForge (Bukkit Plugins)=${{ needs.publish-curseforge-bukkit.result }}
             Publish to Hangar=${{ needs.publish-hangar.result }}
           additional-sections: |
             ### Modrinth
@@ -761,10 +891,16 @@ jobs:
             - **Version Already Exists**: `${{ needs.check-modrinth.outputs.version_exists }}`
             - **Publish Enabled**: `${{ env.PUBLISH_TO_MODRINTH }}`
 
-            ### CurseForge
+            ### CurseForge (Mods)
 
+            - **Project ID**: `${{ env.CURSEFORGE_PROJECT_ID }}`
             - **Publish Enabled**: `${{ env.PUBLISH_TO_CURSEFORGE }}`
-            - **Note**: the Paper plugin is intentionally not published to CurseForge.
+            - **Note**: Fabric/NeoForge only - the Paper plugin goes to the Bukkit Plugins project below.
+
+            ### CurseForge (Bukkit Plugins)
+
+            - **Project ID**: `${{ env.CURSEFORGE_BUKKIT_PROJECT_ID }}` (aka dev.bukkit.org)
+            - **Publish Enabled**: `${{ env.PUBLISH_TO_CURSEFORGE_BUKKIT }}`
 
             ### Hangar
 
@@ -791,8 +927,8 @@ jobs:
             for LOADER in fabric neoforge paper; do
               case "$LOADER" in
                 fabric) LOADERS_DISPLAY="Fabric, Quilt"; PORTALS="Modrinth, CurseForge" ;;
-                # No CurseForge: it files Bukkit plugins under a separate game section.
-                paper)  LOADERS_DISPLAY="Paper, Folia, Purpur, Spigot, Bukkit"; PORTALS="Modrinth, Hangar" ;;
+                # CurseForge files Bukkit plugins under their own section, hence a second project.
+                paper)  LOADERS_DISPLAY="Paper, Folia, Purpur, Spigot, Bukkit"; PORTALS="Modrinth, CurseForge (Bukkit Plugins), Hangar" ;;
                 *)      LOADERS_DISPLAY="${LOADER^}"; PORTALS="Modrinth, CurseForge" ;;
               esac
               for GROUP in $(jq -r ".${LOADER} // {} | keys[]" artifacts/versions.json); do
@@ -809,5 +945,5 @@ jobs:
             done
 
             echo ""
-            echo "**Total version entries: $TOTAL** (see the Portals column - the Paper plugin skips CurseForge)"
+            echo "**Total version entries: $TOTAL** (see the Portals column - the Paper plugin uses a separate CurseForge project)"
           } >> "$GITHUB_STEP_SUMMARY"
