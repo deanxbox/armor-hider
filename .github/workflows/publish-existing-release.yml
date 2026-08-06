@@ -61,8 +61,7 @@ jobs:
   # ============================================================================
   prepare:
     name: Prepare Release Assets
-    needs: determine-runner
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
@@ -205,8 +204,8 @@ jobs:
   # ============================================================================
   publish-modrinth:
     name: Publish to Modrinth
-    needs: [prepare, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: prepare
+    runs-on: ubuntu-latest
     if: inputs.platforms == 'both' || inputs.platforms == 'modrinth'
     permissions:
       contents: read
@@ -299,8 +298,8 @@ jobs:
   # ============================================================================
   publish-curseforge:
     name: Publish to CurseForge
-    needs: [prepare, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: prepare
+    runs-on: ubuntu-latest
     if: inputs.platforms == 'both' || inputs.platforms == 'curseforge'
     permissions:
       contents: read
@@ -403,8 +402,8 @@ jobs:
   # Not matrixed: the Paper plugin is a single version-agnostic jar, so one upload.
   publish-curseforge-bukkit:
     name: Publish to CurseForge (Bukkit Plugins)
-    needs: [prepare, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: prepare
+    runs-on: ubuntu-latest
     if: inputs.platforms == 'both' || inputs.platforms == 'curseforge'
     permissions:
       contents: read
@@ -497,8 +496,8 @@ jobs:
   # ============================================================================
   announce:
     name: Announce Release
-    needs: [prepare, determine-runner, publish-modrinth, publish-curseforge, publish-curseforge-bukkit]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [prepare, publish-modrinth, publish-curseforge, publish-curseforge-bukkit]
+    runs-on: ubuntu-latest
     # Only announce a real (non-dry-run) publish where nothing failed and at least
     # one portal actually uploaded. A skipped portal (platform not selected) is fine.
     if: >-

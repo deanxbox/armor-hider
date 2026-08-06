@@ -58,8 +58,7 @@ jobs:
 
   analyze:
     name: Analyze Changes
-    needs: [determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    runs-on: ubuntu-latest
     outputs:
       should_release: ${{ steps.release-check.outputs.should_release }}
       is_manual_release: ${{ steps.release-check.outputs.is_manual_release }}
@@ -97,8 +96,8 @@ jobs:
 
   validate-version:
     name: Validate Release Version
-    needs: [determine-runner, analyze]
-    runs-on: ${{needs.determine-runner.outputs.runner}}
+    needs: analyze
+    runs-on: ubuntu-latest
     if: needs.analyze.outputs.is_manual_release == 'true'
     steps:
       - name: Checkout
@@ -129,8 +128,8 @@ jobs:
 
   check-modrinth:
     name: Check Modrinth Versions
-    needs: [analyze, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: analyze
+    runs-on: ubuntu-latest
     if: needs.analyze.outputs.should_release == 'true'
     outputs:
       version_exists: ${{ steps.modrinth-check.outputs.version_exists }}
@@ -160,7 +159,7 @@ jobs:
     name: Build
     needs: [analyze, check-modrinth, determine-runner]
     runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
-    
+
     if: "!cancelled() && needs.analyze.result == 'success'"
     defaults:
       run:
@@ -224,8 +223,8 @@ jobs:
 
   changelog:
     name: Generate Changelog
-    needs: [analyze, build, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [analyze, build]
+    runs-on: ubuntu-latest
     if: needs.analyze.outputs.should_release == 'true'
     outputs:
       full: ${{ steps.full-changelog.outputs.content }}
@@ -259,8 +258,8 @@ jobs:
   # ============================================================================
   create-prerelease:
     name: Create GitHub Prerelease
-    needs: [analyze, check-modrinth, build, changelog, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [analyze, check-modrinth, build, changelog]
+    runs-on: ubuntu-latest
     if: |
       needs.analyze.outputs.should_release == 'true' &&
       needs.analyze.outputs.is_manual_release != 'true' &&
@@ -282,8 +281,8 @@ jobs:
   # ============================================================================
   upload-to-release:
     name: Upload to GitHub Release
-    needs: [analyze, build, validate-version, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [analyze, build, validate-version]
+    runs-on: ubuntu-latest
     if: needs.analyze.outputs.is_manual_release == 'true'
     permissions:
       contents: write
@@ -304,8 +303,8 @@ jobs:
   # ============================================================================
   publish-modrinth:
     name: Publish to Modrinth
-    needs: [analyze, check-modrinth, build, changelog, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [analyze, check-modrinth, build, changelog]
+    runs-on: ubuntu-latest
     if: |
       needs.analyze.outputs.should_release == 'true' &&
       needs.analyze.outputs.is_manual_release == 'true' &&
@@ -411,8 +410,8 @@ jobs:
   # ============================================================================
   publish-curseforge:
     name: Publish to CurseForge
-    needs: [analyze, build, changelog, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [analyze, build, changelog]
+    runs-on: ubuntu-latest
     if: |
       needs.analyze.outputs.should_release == 'true' &&
       needs.analyze.outputs.is_manual_release == 'true'
@@ -543,8 +542,8 @@ jobs:
   # Not matrixed: the Paper plugin is a single version-agnostic jar, so one upload.
   publish-curseforge-bukkit:
     name: Publish to CurseForge (Bukkit Plugins)
-    needs: [analyze, build, changelog, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [ analyze, build, changelog ]
+    runs-on: ubuntu-latest
     if: |
       needs.analyze.outputs.should_release == 'true' &&
       needs.analyze.outputs.is_manual_release == 'true'
@@ -648,8 +647,8 @@ jobs:
   # not depend on the :paper subproject wiring in the Gradle publish plugin.
   publish-hangar:
     name: Publish to Hangar
-    needs: [analyze, build, changelog, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [ analyze, build, changelog ]
+    runs-on: ubuntu-latest
     if: |
       needs.analyze.outputs.should_release == 'true' &&
       needs.analyze.outputs.is_manual_release == 'true'
@@ -862,8 +861,8 @@ jobs:
   # ============================================================================
   summary:
     name: Workflow Summary
-    needs: [analyze, determine-runner, validate-version, check-modrinth, build, changelog, create-prerelease, upload-to-release, publish-modrinth, publish-curseforge, publish-curseforge-bukkit, publish-hangar]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [analyze, validate-version, check-modrinth, build, changelog, create-prerelease, upload-to-release, publish-modrinth, publish-curseforge, publish-curseforge-bukkit, publish-hangar]
+    runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Download Artifacts
