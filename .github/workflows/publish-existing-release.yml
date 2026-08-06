@@ -40,22 +40,6 @@ env:
 
 jobs:
 
-  determine-runner:
-    name: Determine Runner
-    runs-on: ubuntu-latest
-    outputs:
-      runner: ${{ steps.pick.outputs.runner }}
-    steps:
-      - name: Pick a runner
-        id: pick
-        uses: zannagh/versionizer/determine-runner@v1
-        with:
-          # Fine-grained PAT with Administration:read on this repo (lists runners). Missing/invalid
-          # token degrades gracefully to default-runs-on.
-          runner-token: ${{ secrets.RUNNER_TOKEN }}
-          required-labels: 'Linux,X64,build'
-          default-runs-on: 'ubuntu-latest'
-
   # ============================================================================
   # PREPARE: gate to admins, pull release assets, reconstruct version metadata
   # ============================================================================

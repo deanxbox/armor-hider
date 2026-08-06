@@ -40,133 +40,68 @@ env:
   PUBLISH_TO_HANGAR: 'true'
 
 jobs:
-  determine-runner:
-    name: Determine Runner
+  # ============================================================================
+  # PREFLIGHT - one runner does all the release-decision work
+  # ============================================================================
+  # Runner pick, version math, release decision, mod-version resolution, downgrade
+  # guard, Modrinth existence check and both changelogs used to be five separate
+  # jobs, each queueing its own runner before anything could build. They are all
+  # sub-minute tasks, so the prepare-release composite action runs them in sequence
+  # in this single job and exposes their combined outputs - build (and every publish
+  # job) now waits on exactly one runner.
+  prepare:
+    name: Prepare Release
     runs-on: ubuntu-latest
     outputs:
-      runner: ${{ steps.pick.outputs.runner }}
-    steps:
-      - name: Pick a runner
-        id: pick
-        uses: zannagh/versionizer/determine-runner@v1
-        with:
-          # Fine-grained PAT with Administration:read on this repo (lists runners). Missing/invalid
-          # token degrades gracefully to default-runs-on.
-          runner-token: ${{ secrets.RUNNER_TOKEN }}
-          required-labels: 'Linux,X64,build'
-          default-runs-on: 'ubuntu-latest'
-
-  analyze:
-    name: Analyze Changes
-    runs-on: ubuntu-latest
-    outputs:
-      should_release: ${{ steps.release-check.outputs.should_release }}
-      is_manual_release: ${{ steps.release-check.outputs.is_manual_release }}
-      skip_reason: ${{ steps.release-check.outputs.skip_reason }}
-      semver: ${{ steps.version.outputs.majorMinorPatch }}
-      prerelease_number: ${{ steps.version.outputs.preReleaseNumber }}
-      full_semver: ${{ steps.version.outputs.fullSemVer }}
-      commits_since: ${{ steps.version.outputs.commitsSinceVersionSource }}
+      runner: ${{ steps.prep.outputs.runner }}
+      should_release: ${{ steps.prep.outputs.should_release }}
+      is_manual_release: ${{ steps.prep.outputs.is_manual_release }}
+      skip_reason: ${{ steps.prep.outputs.skip_reason }}
+      semver: ${{ steps.prep.outputs.semver }}
+      prerelease_number: ${{ steps.prep.outputs.prerelease_number }}
+      full_semver: ${{ steps.prep.outputs.full_semver }}
+      commits_since: ${{ steps.prep.outputs.commits_since }}
+      mod_version: ${{ steps.prep.outputs.mod_version }}
+      is_prerelease: ${{ steps.prep.outputs.is_prerelease }}
+      version_exists: ${{ steps.prep.outputs.version_exists }}
+      version_ok: ${{ steps.prep.outputs.version_ok }}
+      changelog_full: ${{ steps.prep.outputs.changelog_full }}
+      changelog_user: ${{ steps.prep.outputs.changelog_user }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Calculate Version
-        id: version
-        uses: zannagh/versionizer/calculate-version@v1
-
-      - name: Debug Version Info
-        run: |
-          echo "MajorMinorPatch: ${{ steps.version.outputs.majorMinorPatch }}"
-          echo "PreReleaseNumber: ${{ steps.version.outputs.preReleaseNumber }}"
-          echo "FullSemVer: ${{ steps.version.outputs.fullSemVer }}"
-          echo "CommitsSinceVersionSource: ${{ steps.version.outputs.commitsSinceVersionSource }}"
-          echo "PreReleaseLabel: ${{ steps.version.outputs.preReleaseLabel }}"
-          echo "Config Source: ${{ steps.version.outputs.configSource }}"
-
-      - name: Check Release
-        id: release-check
-        uses: zannagh/versionizer/check-release@v1
+      - name: Prepare release
+        id: prep
+        uses: ./.github/actions/prepare-release
         with:
           event-name: ${{ github.event_name }}
           is-dry-run: ${{ inputs.dry_run }}
           force-release: ${{ inputs.force_release }}
-
-  validate-version:
-    name: Validate Release Version
-    needs: analyze
-    runs-on: ubuntu-latest
-    if: needs.analyze.outputs.is_manual_release == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Validate version
-        run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          echo "Tag version: $VERSION"
-
-          # Exclude pre-release tags (containing '-') so that e.g. 0.7.8 is not
-          # considered a downgrade from 0.7.8-pre.2 (sort -V is not SemVer-aware).
-          LATEST=$(git tag -l 'v*' --sort=-v:refname | grep -v -- '-' | head -n1 | sed 's/^v//' || echo "0.0.0")
-          if [[ "$LATEST" == "$VERSION" ]]; then
-            LATEST=$(git tag -l 'v*' --sort=-v:refname | grep -v -- '-' | sed -n '2p' | sed 's/^v//' || echo "0.0.0")
-          fi
-          echo "Latest existing version: $LATEST"
-
-          HIGHER=$(echo -e "$VERSION\n$LATEST" | sort -V | tail -n1)
-          if [[ "$HIGHER" != "$VERSION" && "$VERSION" != "$LATEST" ]]; then
-            echo "::error::Version downgrade detected! New version ($VERSION) is lower than existing version ($LATEST)"
-            exit 1
-          fi
-          echo "Version validation passed: $VERSION >= $LATEST"
-
-  check-modrinth:
-    name: Check Modrinth Versions
-    needs: analyze
-    runs-on: ubuntu-latest
-    if: needs.analyze.outputs.should_release == 'true'
-    outputs:
-      version_exists: ${{ steps.modrinth-check.outputs.version_exists }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Determine version to check
-        id: mod-ver
-        uses: zannagh/versionizer/determine-version@v1
-        with:
-          is-manual-release: ${{ needs.analyze.outputs.is_manual_release }}
           release-tag-name: ${{ github.event.release.tag_name }}
           release-prerelease: ${{ github.event.release.prerelease }}
-          semver: ${{ needs.analyze.outputs.semver }}
-          prerelease-number: ${{ needs.analyze.outputs.prerelease_number }}
-          commits-since: ${{ needs.analyze.outputs.commits_since }}
-
-      - name: Check Modrinth Version
-        id: modrinth-check
-        uses: ./.github/actions/check-modrinth-version
-        with:
-          project-id: ${{ env.MODRINTH_PROJECT_ID }}
-          mod-version: ${{ steps.mod-ver.outputs.version }}
+          release-body: ${{ github.event.release.body }}
+          # Fine-grained PAT with Administration:read on this repo (lists runners).
+          # Missing/invalid token degrades gracefully to default-runs-on.
+          runner-token: ${{ secrets.RUNNER_TOKEN }}
+          modrinth-project-id: ${{ env.MODRINTH_PROJECT_ID }}
+          repository: ${{ github.repository }}
 
   build:
     name: Build
-    needs: [analyze, check-modrinth, determine-runner]
-    runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}
+    needs: [prepare]
+    runs-on: ${{ fromJSON(needs.prepare.outputs.runner) }}
 
-    if: "!cancelled() && needs.analyze.result == 'success'"
+    if: "!cancelled() && needs.prepare.result == 'success'"
     defaults:
       run:
         shell: bash
     outputs:
-      mod_version: ${{ steps.mod-ver.outputs.version }}
-      is_prerelease: ${{ steps.mod-ver.outputs.is_prerelease }}
+      # Pass-through from prepare so downstream jobs keep reading needs.build.outputs.*.
+      mod_version: ${{ needs.prepare.outputs.mod_version }}
+      is_prerelease: ${{ needs.prepare.outputs.is_prerelease }}
       supported_versions: ${{ steps.versions.outputs.matrix }}
     steps:
       - name: Checkout
@@ -183,22 +118,11 @@ jobs:
           path: neoforge/versions/*/build/moddev/artifacts/
           key: nfrt-${{ runner.os }}-${{ hashFiles('neoforge/versions/*/gradle.properties') }}
 
-      - name: Determine Mod Version
-        id: mod-ver
-        uses: zannagh/versionizer/determine-version@v1
-        with:
-          is-manual-release: ${{ needs.analyze.outputs.is_manual_release }}
-          release-tag-name: ${{ github.event.release.tag_name }}
-          release-prerelease: ${{ github.event.release.prerelease }}
-          semver: ${{ needs.analyze.outputs.semver }}
-          prerelease-number: ${{ needs.analyze.outputs.prerelease_number }}
-          commits-since: ${{ needs.analyze.outputs.commits_since }}
-
       - name: Build & Stage Artifacts
         run: |
           ./gradlew stageArtifacts \
-            -PsemVer="${{ steps.mod-ver.outputs.version }}" \
-            -Pprerelease="${{ steps.mod-ver.outputs.is_prerelease }}"
+            -PsemVer="${{ needs.prepare.outputs.mod_version }}" \
+            -Pprerelease="${{ needs.prepare.outputs.is_prerelease }}"
 
       - name: Read Supported Versions
         id: versions
@@ -215,55 +139,23 @@ jobs:
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: armor-hider-${{ steps.mod-ver.outputs.version }}
+          name: armor-hider-${{ needs.prepare.outputs.mod_version }}
           path: |
             staging/*.jar
             staging/versions.json
           if-no-files-found: error
-
-  changelog:
-    name: Generate Changelog
-    needs: [analyze, build]
-    runs-on: ubuntu-latest
-    if: needs.analyze.outputs.should_release == 'true'
-    outputs:
-      full: ${{ steps.full-changelog.outputs.content }}
-      user-facing: ${{ steps.user-changelog.outputs.content }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Generate Full Changelog
-        id: full-changelog
-        uses: zannagh/versionizer/generate-changelog@v1
-        with:
-          is-manual-release: ${{ needs.analyze.outputs.is_manual_release }}
-          release-body: ${{ github.event.release.body }}
-          mod-version: ${{ needs.build.outputs.mod_version }}
-          repository: ${{ github.repository }}
-
-      - name: Generate User-Facing Changelog
-        id: user-changelog
-        uses: ./.github/actions/generate-user-changelog
-        with:
-          is-manual-release: ${{ needs.analyze.outputs.is_manual_release }}
-          release-body: ${{ github.event.release.body }}
-          mod-version: ${{ needs.build.outputs.mod_version }}
-          repository: ${{ github.repository }}
 
   # ============================================================================
   # CREATE GITHUB PRERELEASE (automatic)
   # ============================================================================
   create-prerelease:
     name: Create GitHub Prerelease
-    needs: [analyze, check-modrinth, build, changelog]
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     if: |
-      needs.analyze.outputs.should_release == 'true' &&
-      needs.analyze.outputs.is_manual_release != 'true' &&
-      needs.check-modrinth.outputs.version_exists != 'true'
+      needs.prepare.outputs.should_release == 'true' &&
+      needs.prepare.outputs.is_manual_release != 'true' &&
+      needs.prepare.outputs.version_exists != 'true'
     permissions:
       contents: write
     steps:
@@ -271,7 +163,7 @@ jobs:
         uses: zannagh/versionizer/create-prerelease@v1
         with:
           version: ${{ needs.build.outputs.mod_version }}
-          changelog: ${{ needs.changelog.outputs.full }}
+          changelog: ${{ needs.prepare.outputs.changelog_full }}
           artifact-name: armor-hider-${{ needs.build.outputs.mod_version }}
           artifact-pattern: artifacts/**/*.jar
           dry-run: ${{ inputs.dry_run }}
@@ -281,9 +173,13 @@ jobs:
   # ============================================================================
   upload-to-release:
     name: Upload to GitHub Release
-    needs: [analyze, build, validate-version]
+    needs: [prepare, build]
     runs-on: ubuntu-latest
-    if: needs.analyze.outputs.is_manual_release == 'true'
+    # version_ok is the soft downgrade gate: a downgrade warns and skips this upload
+    # without failing the run (see the prepare-release action).
+    if: |
+      needs.prepare.outputs.is_manual_release == 'true' &&
+      needs.prepare.outputs.version_ok == 'true'
     permissions:
       contents: write
     steps:
@@ -303,12 +199,13 @@ jobs:
   # ============================================================================
   publish-modrinth:
     name: Publish to Modrinth
-    needs: [analyze, check-modrinth, build, changelog]
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     if: |
-      needs.analyze.outputs.should_release == 'true' &&
-      needs.analyze.outputs.is_manual_release == 'true' &&
-      needs.check-modrinth.outputs.version_exists != 'true'
+      needs.prepare.outputs.should_release == 'true' &&
+      needs.prepare.outputs.is_manual_release == 'true' &&
+      needs.prepare.outputs.version_ok == 'true' &&
+      needs.prepare.outputs.version_exists != 'true'
     strategy:
       fail-fast: false
       # Serialize: parallel jobs hammer Modrinth's API and get rate-limited (429). mc-publish
@@ -348,7 +245,7 @@ jobs:
       - name: Preview Modrinth Upload
         if: steps.modrinth.outputs.found == 'true'
         env:
-          CHANGELOG: ${{ needs.changelog.outputs.user-facing }}
+          CHANGELOG: ${{ needs.prepare.outputs.changelog_user }}
         run: |
           echo "=========================================="
           echo "MODRINTH UPLOAD PREVIEW"
@@ -400,7 +297,7 @@ jobs:
           game-versions: |
             ${{ steps.game-versions.outputs.list }}
           game-version-filter: any
-          changelog: ${{ needs.changelog.outputs.user-facing }}
+          changelog: ${{ needs.prepare.outputs.changelog_user }}
           modrinth-featured: false
           retry-attempts: 2
           retry-delay: 10000
@@ -410,11 +307,12 @@ jobs:
   # ============================================================================
   publish-curseforge:
     name: Publish to CurseForge
-    needs: [analyze, build, changelog]
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     if: |
-      needs.analyze.outputs.should_release == 'true' &&
-      needs.analyze.outputs.is_manual_release == 'true'
+      needs.prepare.outputs.should_release == 'true' &&
+      needs.prepare.outputs.is_manual_release == 'true' &&
+      needs.prepare.outputs.version_ok == 'true'
     strategy:
       fail-fast: false
       # Serialize to avoid the same rate-limit race as Modrinth (see publish-modrinth above).
@@ -464,7 +362,7 @@ jobs:
       - name: Preview CurseForge Upload
         if: matrix.loader != 'paper' && steps.curseforge.outputs.found == 'true'
         env:
-          CHANGELOG: ${{ needs.changelog.outputs.user-facing }}
+          CHANGELOG: ${{ needs.prepare.outputs.changelog_user }}
         run: |
           echo "=========================================="
           echo "CURSEFORGE UPLOAD PREVIEW"
@@ -510,7 +408,7 @@ jobs:
           game-versions: |
             ${{ steps.game-versions.outputs.list }}
           game-version-filter: any
-          changelog: ${{ needs.changelog.outputs.user-facing }}
+          changelog: ${{ needs.prepare.outputs.changelog_user }}
           retry-attempts: 2
           retry-delay: 10000
           # Warn (don't fail) when CurseForge lacks a game version, e.g. brand-new
@@ -542,11 +440,12 @@ jobs:
   # Not matrixed: the Paper plugin is a single version-agnostic jar, so one upload.
   publish-curseforge-bukkit:
     name: Publish to CurseForge (Bukkit Plugins)
-    needs: [ analyze, build, changelog ]
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     if: |
-      needs.analyze.outputs.should_release == 'true' &&
-      needs.analyze.outputs.is_manual_release == 'true'
+      needs.prepare.outputs.should_release == 'true' &&
+      needs.prepare.outputs.is_manual_release == 'true' &&
+      needs.prepare.outputs.version_ok == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -583,7 +482,7 @@ jobs:
       - name: Preview CurseForge (Bukkit) Upload
         if: steps.curseforge.outputs.found == 'true'
         env:
-          CHANGELOG: ${{ needs.changelog.outputs.user-facing }}
+          CHANGELOG: ${{ needs.prepare.outputs.changelog_user }}
           GAME_VERSIONS: ${{ steps.game-versions.outputs.list }}
         run: |
           echo "=========================================="
@@ -632,7 +531,7 @@ jobs:
           game-versions: |
             ${{ steps.game-versions.outputs.list }}
           game-version-filter: any
-          changelog: ${{ needs.changelog.outputs.user-facing }}
+          changelog: ${{ needs.prepare.outputs.changelog_user }}
           retry-attempts: 2
           retry-delay: 10000
           # The Bukkit version list is sparser and lags behind the Minecraft one, so warn
@@ -647,11 +546,12 @@ jobs:
   # not depend on the :paper subproject wiring in the Gradle publish plugin.
   publish-hangar:
     name: Publish to Hangar
-    needs: [ analyze, build, changelog ]
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     if: |
-      needs.analyze.outputs.should_release == 'true' &&
-      needs.analyze.outputs.is_manual_release == 'true'
+      needs.prepare.outputs.should_release == 'true' &&
+      needs.prepare.outputs.is_manual_release == 'true' &&
+      needs.prepare.outputs.version_ok == 'true'
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v8
@@ -678,7 +578,7 @@ jobs:
         env:
           MOD_VERSION: ${{ needs.build.outputs.mod_version }}
           IS_PRERELEASE: ${{ needs.build.outputs.is_prerelease }}
-          CHANGELOG: ${{ needs.changelog.outputs.user-facing }}
+          CHANGELOG: ${{ needs.prepare.outputs.changelog_user }}
         run: |
           set -euo pipefail
 
@@ -861,7 +761,7 @@ jobs:
   # ============================================================================
   summary:
     name: Workflow Summary
-    needs: [analyze, validate-version, check-modrinth, build, changelog, create-prerelease, upload-to-release, publish-modrinth, publish-curseforge, publish-curseforge-bukkit, publish-hangar]
+    needs: [prepare, build, create-prerelease, upload-to-release, publish-modrinth, publish-curseforge, publish-curseforge-bukkit, publish-hangar]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -877,20 +777,17 @@ jobs:
         with:
           version: ${{ needs.build.outputs.mod_version }}
           is-prerelease: ${{ needs.build.outputs.is_prerelease }}
-          semver: ${{ needs.analyze.outputs.semver }}
-          full-semver: ${{ needs.analyze.outputs.full_semver }}
-          prerelease-number: ${{ needs.analyze.outputs.prerelease_number }}
-          commits-since: ${{ needs.analyze.outputs.commits_since }}
-          should-release: ${{ needs.analyze.outputs.should_release }}
-          is-manual-release: ${{ needs.analyze.outputs.is_manual_release }}
-          skip-reason: ${{ needs.analyze.outputs.skip_reason }}
-          changelog: ${{ needs.changelog.outputs.full }}
+          semver: ${{ needs.prepare.outputs.semver }}
+          full-semver: ${{ needs.prepare.outputs.full_semver }}
+          prerelease-number: ${{ needs.prepare.outputs.prerelease_number }}
+          commits-since: ${{ needs.prepare.outputs.commits_since }}
+          should-release: ${{ needs.prepare.outputs.should_release }}
+          is-manual-release: ${{ needs.prepare.outputs.is_manual_release }}
+          skip-reason: ${{ needs.prepare.outputs.skip_reason }}
+          changelog: ${{ needs.prepare.outputs.changelog_full }}
           job-results: |
-            Analyze Changes=${{ needs.analyze.result }}
-            Validate Version=${{ needs.validate-version.result }}
-            Check Modrinth=${{ needs.check-modrinth.result }}
+            Prepare Release=${{ needs.prepare.result }}
             Build=${{ needs.build.result }}
-            Changelog=${{ needs.changelog.result }}
             Create Prerelease=${{ needs.create-prerelease.result }}
             Upload to Release=${{ needs.upload-to-release.result }}
             Publish to Modrinth=${{ needs.publish-modrinth.result }}
@@ -900,7 +797,7 @@ jobs:
           additional-sections: |
             ### Modrinth
 
-            - **Version Already Exists**: `${{ needs.check-modrinth.outputs.version_exists }}`
+            - **Version Already Exists**: `${{ needs.prepare.outputs.version_exists }}`
             - **Publish Enabled**: `${{ env.PUBLISH_TO_MODRINTH }}`
 
             ### CurseForge (Mods)

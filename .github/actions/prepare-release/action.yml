@@ -1,0 +1,209 @@
+name: Prepare Release
+description: >
+  Single-runner release preflight: picks a build runner, calculates the version,
+  decides whether to release, resolves the mod version, validates against downgrades,
+  checks Modrinth for an existing version and generates the changelogs - all in one
+  job so downstream work waits on exactly one runner instead of four sequential jobs.
+
+inputs:
+  event-name:
+    description: The triggering event name (github.event_name)
+    required: true
+  is-dry-run:
+    description: Whether this is a dry run
+    required: false
+    default: 'false'
+  force-release:
+    description: Force a prerelease even if only non-code files changed
+    required: false
+    default: 'false'
+  release-tag-name:
+    description: The GitHub release tag name (manual releases only)
+    required: false
+    default: ''
+  release-prerelease:
+    description: Whether the GitHub release is marked prerelease (manual releases only)
+    required: false
+    default: ''
+  release-body:
+    description: The GitHub release body (manual releases only)
+    required: false
+    default: ''
+  runner-token:
+    description: >
+      Fine-grained PAT with Administration:read used to list self-hosted runners.
+      Missing/invalid degrades gracefully to default-runs-on.
+    required: false
+    default: ''
+  required-labels:
+    description: Comma-separated labels a self-hosted runner must have
+    required: false
+    default: 'Linux,X64,build'
+  default-runs-on:
+    description: Runner to fall back to when no matching self-hosted runner is free
+    required: false
+    default: 'ubuntu-latest'
+  modrinth-project-id:
+    description: The Modrinth project ID/slug to check for an existing version
+    required: true
+  repository:
+    description: The GitHub repository (owner/repo) for changelog links
+    required: true
+
+outputs:
+  runner:
+    description: The JSON runs-on value for the build job
+    value: ${{ steps.runner.outputs.runner }}
+  semver:
+    description: MajorMinorPatch version
+    value: ${{ steps.version.outputs.majorMinorPatch }}
+  prerelease_number:
+    description: Prerelease number
+    value: ${{ steps.version.outputs.preReleaseNumber }}
+  full_semver:
+    description: Full SemVer string
+    value: ${{ steps.version.outputs.fullSemVer }}
+  commits_since:
+    description: Commits since the version source
+    value: ${{ steps.version.outputs.commitsSinceVersionSource }}
+  should_release:
+    description: Whether a release should be produced
+    value: ${{ steps.release-check.outputs.should_release }}
+  is_manual_release:
+    description: Whether this is a manual (GitHub Release) triggered release
+    value: ${{ steps.release-check.outputs.is_manual_release }}
+  skip_reason:
+    description: Why a release was skipped (if it was)
+    value: ${{ steps.release-check.outputs.skip_reason }}
+  mod_version:
+    description: The resolved mod version string
+    value: ${{ steps.mod-ver.outputs.version }}
+  is_prerelease:
+    description: Whether the resolved mod version is a prerelease
+    value: ${{ steps.mod-ver.outputs.is_prerelease }}
+  version_exists:
+    description: Whether the version already exists on Modrinth
+    value: ${{ steps.modrinth.outputs.version_exists }}
+  version_ok:
+    description: >
+      Whether the version passes the downgrade check. 'false' means a downgrade was
+      detected on a manual release - a soft gate: publishing/upload/prerelease are
+      skipped but the workflow does not fail. Defaults to 'true' when not applicable.
+    value: ${{ steps.validate.outputs.version_ok || 'true' }}
+  changelog_full:
+    description: The full changelog content
+    value: ${{ steps.full-changelog.outputs.content }}
+  changelog_user:
+    description: The user-facing changelog content
+    value: ${{ steps.user-changelog.outputs.content }}
+
+runs:
+  using: composite
+  steps:
+    # 1. Pick the build runner (independent of the version math, but folded in here so
+    #    it does not cost its own runner slot).
+    - name: Pick a runner
+      id: runner
+      uses: zannagh/versionizer/determine-runner@v1
+      with:
+        runner-token: ${{ inputs.runner-token }}
+        required-labels: ${{ inputs.required-labels }}
+        default-runs-on: ${{ inputs.default-runs-on }}
+
+    # 2. Version math from git history (requires the caller to checkout with fetch-depth: 0).
+    - name: Calculate version
+      id: version
+      uses: zannagh/versionizer/calculate-version@v1
+
+    - name: Debug version info
+      shell: bash
+      run: |
+        echo "MajorMinorPatch: ${{ steps.version.outputs.majorMinorPatch }}"
+        echo "PreReleaseNumber: ${{ steps.version.outputs.preReleaseNumber }}"
+        echo "FullSemVer: ${{ steps.version.outputs.fullSemVer }}"
+        echo "CommitsSinceVersionSource: ${{ steps.version.outputs.commitsSinceVersionSource }}"
+        echo "PreReleaseLabel: ${{ steps.version.outputs.preReleaseLabel }}"
+        echo "Config Source: ${{ steps.version.outputs.configSource }}"
+
+    # 3. Decide whether this run should produce a release.
+    - name: Check release
+      id: release-check
+      uses: zannagh/versionizer/check-release@v1
+      with:
+        event-name: ${{ inputs.event-name }}
+        is-dry-run: ${{ inputs.is-dry-run }}
+        force-release: ${{ inputs.force-release }}
+
+    # 4. Resolve the concrete mod version string (shared by validate, Modrinth check,
+    #    changelog and the build itself).
+    - name: Determine mod version
+      id: mod-ver
+      uses: zannagh/versionizer/determine-version@v1
+      with:
+        is-manual-release: ${{ steps.release-check.outputs.is_manual_release }}
+        release-tag-name: ${{ inputs.release-tag-name }}
+        release-prerelease: ${{ inputs.release-prerelease }}
+        semver: ${{ steps.version.outputs.majorMinorPatch }}
+        prerelease-number: ${{ steps.version.outputs.preReleaseNumber }}
+        commits-since: ${{ steps.version.outputs.commitsSinceVersionSource }}
+
+    # 5. Downgrade guard (manual releases only). Soft gate: on a downgrade we warn and
+    #    set version_ok=false rather than failing, so the caller can skip publishing,
+    #    the GitHub release upload and prerelease creation without turning the run red.
+    - name: Validate release version
+      id: validate
+      if: steps.release-check.outputs.is_manual_release == 'true'
+      shell: bash
+      env:
+        TAG: ${{ inputs.release-tag-name }}
+      run: |
+        VERSION="${TAG#v}"
+        echo "Tag version: $VERSION"
+
+        # Exclude pre-release tags (containing '-') so that e.g. 0.7.8 is not
+        # considered a downgrade from 0.7.8-pre.2 (sort -V is not SemVer-aware).
+        LATEST=$(git tag -l 'v*' --sort=-v:refname | grep -v -- '-' | head -n1 | sed 's/^v//' || echo "0.0.0")
+        if [[ "$LATEST" == "$VERSION" ]]; then
+          LATEST=$(git tag -l 'v*' --sort=-v:refname | grep -v -- '-' | sed -n '2p' | sed 's/^v//' || echo "0.0.0")
+        fi
+        echo "Latest existing version: $LATEST"
+
+        HIGHER=$(echo -e "$VERSION\n$LATEST" | sort -V | tail -n1)
+        if [[ "$HIGHER" != "$VERSION" && "$VERSION" != "$LATEST" ]]; then
+          echo "::warning::Version downgrade detected! New version ($VERSION) is lower than existing version ($LATEST). Skipping publishing, release upload and prerelease creation."
+          echo "version_ok=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "Version validation passed: $VERSION >= $LATEST"
+          echo "version_ok=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    # 6. Has this version already been published to Modrinth?
+    - name: Check Modrinth version
+      id: modrinth
+      if: steps.release-check.outputs.should_release == 'true'
+      uses: ./.github/actions/check-modrinth-version
+      with:
+        project-id: ${{ inputs.modrinth-project-id }}
+        mod-version: ${{ steps.mod-ver.outputs.version }}
+
+    # 7. Changelogs - known already at this point since they only need the mod version
+    #    and git history, so they are generated here and merely consumed if we publish.
+    - name: Generate full changelog
+      id: full-changelog
+      if: steps.release-check.outputs.should_release == 'true'
+      uses: zannagh/versionizer/generate-changelog@v1
+      with:
+        is-manual-release: ${{ steps.release-check.outputs.is_manual_release }}
+        release-body: ${{ inputs.release-body }}
+        mod-version: ${{ steps.mod-ver.outputs.version }}
+        repository: ${{ inputs.repository }}
+
+    - name: Generate user-facing changelog
+      id: user-changelog
+      if: steps.release-check.outputs.should_release == 'true'
+      uses: ./.github/actions/generate-user-changelog
+      with:
+        is-manual-release: ${{ steps.release-check.outputs.is_manual_release }}
+        release-body: ${{ inputs.release-body }}
+        mod-version: ${{ steps.mod-ver.outputs.version }}
+        repository: ${{ inputs.repository }}
