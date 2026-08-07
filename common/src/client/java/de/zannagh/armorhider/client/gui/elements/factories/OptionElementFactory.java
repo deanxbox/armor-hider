@@ -104,19 +104,9 @@ public class OptionElementFactory {
                 }
         );
 
+        // The accessory + hidden-model (EMF) compat toggles live in their own "Compatibilities" row
+        // (see ArmorHiderOptionsPanelWidget), not here, so this row stays behaviour-only.
         var globalButtons = new java.util.ArrayList<AbstractWidget>(java.util.List.of(first, second, third));
-        // Accessory-hide master toggle: present only when an accessory provider is loaded (configs has
-        // a 4th entry). Inserted before the "individual settings" button so that stays right-most.
-        if (configs.size() > 3) {
-            globalButtons.add(new AffectAccessoriesButton(
-                    configs.get(3).getFirst(),
-                    onPress -> {
-                        if (onPress instanceof AffectAccessoriesButton btn) {
-                            configs.get(3).getSecond().accept(btn.toggle());
-                        }
-                    }
-            ));
-        }
         globalButtons.add(fourth);
 
         int globalButtonCount = globalButtons.size();
@@ -191,25 +181,42 @@ public class OptionElementFactory {
                 }
         );
 
+        // The accessory + hidden-model compat toggles moved to the dedicated "Compatibilities" row.
         var buttons = new java.util.ArrayList<AbstractWidget>(java.util.List.of(first, second, third));
-        // Optional 4th toggle: accessory-hide master, present only when the panel supplied it (i.e. an
-        // accessory provider - Curios / Trinkets / Artifacts - is loaded).
-        if (configs.size() > 3) {
-            buttons.add(new AffectAccessoriesButton(
-                    configs.get(3).getFirst(),
-                    onPress -> {
-                        if (onPress instanceof AffectAccessoriesButton btn) {
-                            configs.get(3).getSecond().accept(btn.toggle());
-                        }
-                    }
-            ));
-        }
 
         int sq = UiConstants.SQUARE_BUTTON_WIDTH;
         var spacing = new ElementSpacingOptions(rowWidth)
                 .forEvenElements(sq, buttons.size())
                 .withLeftAlignment();
         return new CompoundButtonWidget(buttons.toArray(new AbstractWidget[0]), rowWidth, 20, spacing);
+    }
+
+    /**
+     * A "Compatibilities" row: a left-aligned label filling the left, with the given compat toggle
+     * buttons as fixed square icons right-bound on the right (same width as the other toggles).
+     * Returns {@code null} when there are no compat buttons to show, so the caller can omit the row.
+     *
+     * @param compatButtons the square compat toggle buttons (0-2); empty means no row
+     * @return the row widget, or {@code null} if there is nothing to show
+     */
+    public @Nullable AbstractWidget createCompatibilitiesRow(java.util.List<AbstractWidget> compatButtons) {
+        if (compatButtons.isEmpty()) {
+            return null;
+        }
+        // Left-aligned label (MultiLineTextWidget defaults to left-aligned) nudged to vertically centre
+        // in the row; CompoundOptionWidget sets its X/width and top Y, so we offset Y on top of that.
+        int rowHeight = UiConstants.DEFAULT_BUTTON_HEIGHT;
+        var label = new MultiLineTextWidget(
+                Component.translatable("armorhider.options.compatibilities"),
+                Minecraft.getInstance().font) {
+            @Override
+            public void setY(int y) {
+                super.setY(y + Math.max(0, (rowHeight - Minecraft.getInstance().font.lineHeight) / 2));
+            }
+        };
+        AbstractWidget secondary = compatButtons.get(0);
+        AbstractWidget tertiary = compatButtons.size() > 1 ? compatButtons.get(1) : null;
+        return new CompoundOptionWidget(label, secondary, tertiary, null, rowWidth, 20);
     }
 
     public void addSliderWithToggles(EquipmentSlot slot,
