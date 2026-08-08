@@ -9,6 +9,9 @@ import org.junit.jupiter.api.Assertions;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Stream;
 
 /**
@@ -56,6 +59,14 @@ class SmokeMatrixTest {
     private static final String BOOT_READY_MARKER = "[smoke] Armed: will exit JVM";
     /** Cut the boot row short once we've gone this many ms without a new log line. */
     private static final long BOOT_IDLE_THRESHOLD_MS = 3_000;
+    /**
+     * Once the marker is seen, also cut the boot short after this long even if the output never
+     * idles. NeoForge arms during mod loading (the marker is premature) and then keeps logging its
+     * way to the title screen without ever hitting {@link #BOOT_IDLE_THRESHOLD_MS} of silence, so
+     * idle-only detection ran every NeoForge boot to the ceiling. This bounds a booted-but-chatty
+     * client to marker+grace; a crash in the window still fails (GradleFork crash-signature guard).
+     */
+    private static final long BOOT_GRACE_AFTER_MARKER_MS = 20_000;
     /** Hard ceiling - if we never see the marker, kill the JVM and call it a failure. */
     private static final long BOOT_HARD_CEILING_MS = 90_000;
 
@@ -84,11 +95,11 @@ class SmokeMatrixTest {
     );
 
     /**
-     * The FCGT variant covered per-scenario by {@link FcgtScenarioTest} instead of by the batched
-     * {@code runClientGametest} row here. {@code FcgtScenarioTest} forks one launch per FCGT id on
-     * this variant, giving each scenario its own IDE-discoverable node - so a batched all-in-one
-     * ENTITY_RENDER row for the same variant would only duplicate (coarser) coverage. The other
-     * {@link #FCGT_VARIANTS} keep their single batched row for cross-version breadth.
+     * The canonical variant {@link FcgtScenarioTest} expands per-scenario (one client launch per FCGT
+     * id, each its own IDE node). Per-id is OPT-IN ({@code -Dsmoke.fcgt.perId=true}) and ADDITIVE - the
+     * batched {@code ENTITY_RENDER} row below still runs for every {@link #FCGT_VARIANTS} entry incl.
+     * this one, so the default suite keeps fast one-launch FCGT coverage on 26.2 (~1 min) and pays the
+     * ~8-launch per-id cost only when explicitly asked for granular debugging.
      */
     static final String FCGT_PER_ID_VARIANT = "fabric-26.2";
 
@@ -131,12 +142,19 @@ class SmokeMatrixTest {
                 continue;
             }
             String loader = variant.split("-")[0];
-            for (String compat : compatSets) {
+            // The default compat stack (EMF/ETF/FA/Wildfire-gender/first-person/...) is Fabric-only, so
+            // fetching it for a NeoForge instance drags in jars NeoForge can't class-load and crashes
+            // the boot - an inherent mismatch, not a product/harness bug. Skip the non-none default rows
+            // on NeoForge; an EXPLICIT -Dsmoke.compat=<mod> (e.g. a NeoForge-side mod) is still honoured.
+            List<String> variantCompat = compatSets;
+            if (loader.equals("neoforge") && compatOverride.isEmpty()) {
+                variantCompat = List.of("none");
+            }
+            for (String compat : variantCompat) {
                 if (wantBoot) {
                     rows.add(Arguments.of(loader, variant, compat, Phase.BOOT));
                 }
-                if (wantEntityRender && FCGT_VARIANTS.contains(variant)
-                        && !variant.equals(FCGT_PER_ID_VARIANT)) {
+                if (wantEntityRender && FCGT_VARIANTS.contains(variant)) {
                     rows.add(Arguments.of(loader, variant, compat, Phase.ENTITY_RENDER));
                 }
             }
@@ -156,6 +174,15 @@ class SmokeMatrixTest {
      *       and use the real exit code.</li>
      * </ul>
      */
+    /**
+     * One lock per variant. Under {@code -Dsmoke.parallel=N} JUnit runs the matrix rows concurrently,
+     * but the two compat rows and two phases of a SINGLE variant share that variant project's {@code
+     * run/} dir (and {@code fetchCompatJars} rewrites {@code run/mods}), so they must not overlap.
+     * Different variants are different gradle subprojects with their own dirs, so they parallelise
+     * freely. When run sequentially (the default) these locks are uncontended no-ops.
+     */
+    private static final ConcurrentHashMap<String, Lock> VARIANT_LOCKS = new ConcurrentHashMap<>();
+
     @ParameterizedTest(name = "{3} {1} compat={2}")
     @MethodSource("matrix")
     void launches_without_crashing(String loader, String variant, String compat, Phase phase) throws Exception {
@@ -170,10 +197,17 @@ class SmokeMatrixTest {
         cmd.add("--console=plain");
         cmd.add("--no-daemon");
 
-        GradleFork.Result r = phase == Phase.BOOT
-                ? GradleFork.runUntilIdleAfterMarker(cmd, repoRoot.toFile(), BOOT_READY_MARKER,
-                        BOOT_IDLE_THRESHOLD_MS, BOOT_HARD_CEILING_MS)
-                : GradleFork.runToExit(cmd, repoRoot.toFile(), ROW_HARD_CEILING_MS);
+        Lock variantLock = VARIANT_LOCKS.computeIfAbsent(variant, v -> new ReentrantLock());
+        variantLock.lock();
+        GradleFork.Result r;
+        try {
+            r = phase == Phase.BOOT
+                    ? GradleFork.runUntilIdleAfterMarker(cmd, repoRoot.toFile(), BOOT_READY_MARKER,
+                            BOOT_IDLE_THRESHOLD_MS, BOOT_GRACE_AFTER_MARKER_MS, BOOT_HARD_CEILING_MS)
+                    : GradleFork.runToExit(cmd, repoRoot.toFile(), ROW_HARD_CEILING_MS);
+        } finally {
+            variantLock.unlock();
+        }
 
         if (r.exitCode() != 0) {
             Assertions.fail(String.format(
