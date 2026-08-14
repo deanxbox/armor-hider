@@ -165,3 +165,63 @@ run {
         }
     }
 }
+
+tasks.register("projectCleanup") {
+    group = "build"
+    description = "Delete build/run artifacts (run, logs, staging, build, out, bin) and stale stonecutter " +
+        "version folders no longer in versions.json5. Use -PcleanupDryRun to preview."
+
+    val versionsFile = rootProject.file("versions.json5")
+    val activeVariants: Set<String> =
+        Regex("\"((?:fabric|neoforge)-[A-Za-z0-9.-]+):")
+            .findAll(if (versionsFile.exists()) versionsFile.readText() else "")
+            .map { it.groupValues[1] }
+            .toSet()
+    val artifactDirNames = setOf("run", "logs", "staging", "build", "out", "bin")
+    val projectRoot = rootProject.projectDir
+
+    doLast {
+        val dryRun = project.hasProperty("cleanupDryRun")
+        var removed = 0
+        var freedBytes = 0L
+
+        fun sizeOf(dir: File): Long =
+            dir.walkTopDown().filter { it.isFile }.fold(0L) { acc, f -> acc + f.length() }
+
+        fun remove(dir: File, kind: String) {
+            val size = sizeOf(dir)
+            freedBytes += size
+            removed++
+            val rel = dir.relativeTo(projectRoot).path
+            logger.lifecycle("  ${if (dryRun) "would delete" else "deleting"} [$kind] $rel (${size / 1024 / 1024} MB)")
+            if (!dryRun && !dir.deleteRecursively()) {
+                logger.warn("    could not fully delete $rel")
+            }
+        }
+
+        if (activeVariants.isEmpty()) {
+            logger.warn("projectCleanup: read no variants from versions.json5; skipping stale-version removal.")
+        } else {
+            listOf("common", "fabric", "neoforge").forEach { module ->
+                projectRoot.resolve("$module/versions").listFiles()
+                    ?.filter { it.isDirectory && it.name !in activeVariants }
+                    ?.sortedBy { it.name }
+                    ?.forEach { remove(it, "stale version") }
+            }
+        }
+
+        fun sweep(dir: File) {
+            val children = dir.listFiles()?.sortedBy { it.name } ?: return
+            for (child in children) {
+                if (!child.isDirectory || child.name.startsWith(".")) continue
+                if (child.name in artifactDirNames) remove(child, "artifact") else sweep(child)
+            }
+        }
+        sweep(projectRoot)
+
+        logger.lifecycle(
+            "projectCleanup: ${if (dryRun) "would free" else "freed"} ~${freedBytes / 1024 / 1024} MB " +
+                "across $removed folder(s)${if (dryRun) " (dry run - nothing deleted)" else ""}."
+        )
+    }
+}
