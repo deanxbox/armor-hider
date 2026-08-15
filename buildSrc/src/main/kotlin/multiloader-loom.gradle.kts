@@ -162,6 +162,20 @@ if (branch == "common") {
         }
         add("compileOnly", "net.luckperms:api:5.4")
         add("compileOnly", "org.jspecify:jspecify:1.0.0")
+        // eunomia-core: the MC-free, version-agnostic API surface (CommunicationManager, PacketType,
+        // the transport interfaces). Plain compileOnly - it is a normal Java library, NOT a remapped
+        // mod jar, so it never goes through loom. One coordinate resolves on every variant because the
+        // core artifact carries no MC version. The runtime implementation ships in the eunomia mod
+        // (declared as a required dependency in fabric.mod.json / neoforge.mods.toml), so eunomia is
+        // never bundled here. Mirrored unremapped in multiloader-loader for the loader compile.
+        if (hasProperty("eunomia.version")) {
+            add("compileOnly", "de.zannagh.eunomia:eunomia-core:${findProperty("eunomia.version")}")
+            // eunomia-core is compileOnly for the mod (the eunomia mod supplies it at game runtime), but
+            // the JUnit tests load the config POJOs in a plain JVM and those now implement eunomia's
+            // NetworkHealable / encode via its PayloadCodec, so the class must be on the test runtime
+            // classpath too. Test scope only - never bundled into the shipped mod jar.
+            add("testRuntimeOnly", "de.zannagh.eunomia:eunomia-core:${findProperty("eunomia.version")}")
+        }
         add("testImplementation", platform("org.junit:junit-bom:6.0.1"))
         add("testImplementation", "org.junit.jupiter:junit-jupiter")
         add("testRuntimeOnly", "org.junit.platform:junit-platform-launcher")
@@ -484,6 +498,37 @@ if (branch == "fabric") {
             outputs.upToDateWhen { false }
         }
 
+        // armor-hider now consumes eunomia-core at compile time only; the eunomia MOD supplies the
+        // networking transports + codec injection + capability handshake at game runtime and is a
+        // REQUIRED dependency (fabric.mod.json). So every FCGT client launch must have the eunomia
+        // fabric mod jar in run/mods, or armor-hider fails its dependency, MC boots vanilla and the
+        // gametest exits ZERO having run nothing (a false green - blueprint risk R4). We copy the
+        // pre-built eunomia fabric jar for this variant's MC version. Resolve order: -Peunomia.fabric.jar
+        // override, else the sibling eunomia repo's build output. Fail fast if it is absent.
+        val eunomiaRepo = (findProperty("eunomia.repo")?.toString())
+            ?: "${System.getProperty("user.home")}/projects/eunomia/java"
+        val eunomiaFabricJar = (findProperty("eunomia.fabric.jar")?.toString())
+            ?: "$eunomiaRepo/fabric/versions/fabric-$mcVersion/build/libs/eunomia-fabric-${property("eunomia.version")}+$mcVersion.jar"
+        val copyEunomiaToMods = tasks.register<Copy>("copyEunomiaToMods") {
+            group = "verification"
+            description = "Drop the eunomia fabric mod jar into run/mods/ (armor-hider's required runtime dependency)."
+            from(eunomiaFabricJar)
+            into(project.layout.projectDirectory.dir("run/mods"))
+            // fetchFcgtCompatJars wipes run/mods first; land after it, same as the FCGT copy.
+            mustRunAfter("fetchFcgtCompatJars")
+            outputs.upToDateWhen { false }
+            doFirst {
+                if (!file(eunomiaFabricJar).exists()) {
+                    throw GradleException(
+                        "eunomia fabric mod jar not found at:\n  $eunomiaFabricJar\n" +
+                            "armor-hider requires the eunomia mod at runtime. Build it " +
+                            "(cd ${eunomiaRepo} && ./gradlew \"Set active project to fabric-$mcVersion\" build) " +
+                            "or pass -Peunomia.fabric.jar=<path>."
+                    )
+                }
+            }
+        }
+
         tasks.named("runClientGametest") {
             // NOT gated on -Psmoke. The FCGT module jar is what makes this task do anything at all:
             // without it on the runtime classpath fabric-loader never loads FCGT's mixin plugin, MC
@@ -493,6 +538,8 @@ if (branch == "fabric") {
             // leftover and every other variant did not, so the Paper E2E matrix "passed" on 26.2 and
             // silently ran nothing elsewhere.
             dependsOn(copyFcgtToMods)
+            // Same unconditional guarantee for the eunomia runtime dependency (see above).
+            dependsOn(copyEunomiaToMods)
         }
         if (project.hasProperty("smoke")) {
             // Compat-mod fetching stays smoke-only: it wipes run/mods and pulls the full

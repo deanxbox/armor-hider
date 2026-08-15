@@ -50,6 +50,13 @@ base {
 repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
+    // eunomia-core is published only to the local maven repo for now. Scoped so nothing else
+    // accidentally resolves from mavenLocal.
+    mavenLocal {
+        content {
+            includeGroup("de.zannagh.eunomia")
+        }
+    }
 }
 
 dependencies {
@@ -61,6 +68,11 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:1.20.4-R0.1-SNAPSHOT")
     compileOnly("net.luckperms:api:5.4")
     implementation("com.google.code.gson:gson:2.11.0")
+    // The shared, Minecraft-free networking core: PacketType, CommunicationManager, the wire codec
+    // and the built-in handshake. Shaded into the plugin jar below so the same clean frame the
+    // loaders speak is spoken here. Its gson/slf4j are compileOnly upstream, so nothing transitive
+    // is bundled; Paper supplies slf4j at runtime and this project bundles (relocated) gson.
+    implementation("de.zannagh.eunomia:eunomia-core:${property("eunomia.version")}")
 
     testImplementation(platform("org.junit:junit-bom:6.0.1"))
     testImplementation("org.junit.jupiter:junit-jupiter")

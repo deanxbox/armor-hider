@@ -110,6 +110,11 @@ extra["commonProject"] = commonProject
 dependencies {
     compileOnly("org.jspecify:jspecify:1.0.0")
     compileOnly("net.luckperms:api:5.4")
+    // eunomia-core, unremapped - the loader recompiles common's sources, so it needs the same
+    // version-agnostic API on its compile classpath (see the compileOnly in multiloader-loom).
+    if (hasProperty("eunomia.version")) {
+        add("compileOnly", "de.zannagh.eunomia:eunomia-core:${findProperty("eunomia.version")}")
+    }
     if (hasProperty("geckolib.version")) {
         add("compileOnly", "maven.modrinth:geckolib:${findProperty("geckolib.version")}")
     }

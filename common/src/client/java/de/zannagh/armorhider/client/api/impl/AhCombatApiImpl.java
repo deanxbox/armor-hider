@@ -2,8 +2,9 @@ package de.zannagh.armorhider.client.api.impl;
 
 import de.zannagh.armorhider.api.ArmorHiderApi;
 import de.zannagh.armorhider.client.ArmorHiderClient;
-import de.zannagh.armorhider.client.net.ClientPacketSender;
+import de.zannagh.armorhider.client.net.ClientSendGate;
 import de.zannagh.armorhider.combat.DefaultCombatEvent;
+import de.zannagh.armorhider.net.AhPackets;
 import de.zannagh.armorhider.net.packets.CombatLogEventPacket;
 import de.zannagh.armorhider.net.packets.PlayerConfig;
 import de.zannagh.armorhider.util.PlayerNameUtil;
@@ -67,7 +68,8 @@ public final class AhCombatApiImpl {
         if (victimName != null) {
             ArmorHiderApi.getInstance().getCombatManagement().registerCombatEvent(new DefaultCombatEvent(victimName, System.currentTimeMillis()));
             if (Minecraft.getInstance().player != null) {
-                ClientPacketSender.sendToServer(new CombatLogEventPacket(victim, Minecraft.getInstance().player.getUUID()));
+                ClientSendGate.send(AhPackets.COMBAT_EVENT,
+                        new CombatLogEventPacket(victim, Minecraft.getInstance().player.getUUID()));
             }
         }
     }

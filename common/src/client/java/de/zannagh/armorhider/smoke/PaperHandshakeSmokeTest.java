@@ -4,10 +4,11 @@ package de.zannagh.armorhider.smoke;
 import de.zannagh.armorhider.ArmorHider;
 import de.zannagh.armorhider.api.ArmorHiderApi;
 import de.zannagh.armorhider.client.ArmorHiderClient;
-import de.zannagh.armorhider.client.net.ClientCommunicationManager;
-import de.zannagh.armorhider.client.net.ClientPacketSender;
+import de.zannagh.armorhider.client.net.ClientSendGate;
+import de.zannagh.armorhider.net.AhPackets;
 import de.zannagh.armorhider.net.packets.ServerWideSettings;
 import de.zannagh.armorhider.server.ServerConfiguration;
+import de.zannagh.eunomia.networking.CommunicationManager;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 
@@ -279,7 +280,7 @@ public final class PaperHandshakeSmokeTest implements FabricClientGameTest {
         context.runOnClient(client -> {
             // 0 is unreachable by any client code path, so a later 4 can only come off the wire.
             ArmorHiderClient.permissionLevel = 0;
-            ClientPacketSender.sendToServer(ArmorHiderClient.CLIENT_CONFIG_MANAGER
+            ClientSendGate.send(AhPackets.PLAYER_CONFIG, ArmorHiderClient.CLIENT_CONFIG_MANAGER
                     .resolveConfig(ArmorHiderClient.getCurrentPlayerName())
                     .forNetwork());
         });
@@ -309,7 +310,7 @@ public final class PaperHandshakeSmokeTest implements FabricClientGameTest {
      */
     private void assertServerHandshake(ClientGameTestContext context) {
         try {
-            context.waitFor(client -> ClientCommunicationManager.SERVER_SUPPORTS_MOD, HANDSHAKE_WINDOW_TICKS);
+            context.waitFor(client -> CommunicationManager.serverCapabilities().isPresent(), HANDSHAKE_WINDOW_TICKS);
         } catch (AssertionError | RuntimeException e) {
             throw new IllegalStateException(
                     "[smoke/fcgt] SERVER_SUPPORTS_MOD never became true within " + HANDSHAKE_WINDOW_TICKS
@@ -330,7 +331,7 @@ public final class PaperHandshakeSmokeTest implements FabricClientGameTest {
     private void assertHandshakeResetsOnReconnect(ClientGameTestContext context, int port) {
         TestServerConnect.disconnect(context);
         try {
-            context.waitFor(client -> !ClientCommunicationManager.SERVER_SUPPORTS_MOD, DISCONNECT_RESET_TICKS);
+            context.waitFor(client -> !CommunicationManager.serverCapabilities().isPresent(), DISCONNECT_RESET_TICKS);
         } catch (AssertionError | RuntimeException e) {
             throw new IllegalStateException(
                     "[smoke/fcgt] SERVER_SUPPORTS_MOD stayed true after disconnecting. The disconnect handler"
@@ -341,7 +342,7 @@ public final class PaperHandshakeSmokeTest implements FabricClientGameTest {
 
         TestServerConnect.connect(context, HOST, port);
         try {
-            context.waitFor(client -> ClientCommunicationManager.SERVER_SUPPORTS_MOD, HANDSHAKE_WINDOW_TICKS);
+            context.waitFor(client -> CommunicationManager.serverCapabilities().isPresent(), HANDSHAKE_WINDOW_TICKS);
         } catch (AssertionError | RuntimeException e) {
             throw new IllegalStateException(
                     "[smoke/fcgt] After reconnecting, the handshake did not re-arrive within "

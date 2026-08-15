@@ -30,6 +30,16 @@ versionRange="${minecraft_version}"
 ordering="NONE"
 side="BOTH"
 
+# eunomia supplies the config/networking framework armor-hider compiles against (eunomia-core) and
+# installs the live client/server transports at runtime. Ordered AFTER so eunomia's init runs first.
+# Flip type to "optional" for a non-breaking stub while the eunomia mod is not yet distributed.
+[[dependencies."armor_hider"]]
+modId="eunomia"
+type="required"
+versionRange="[0.2.0,)"
+ordering="AFTER"
+side="BOTH"
+
 [[dependencies."armor_hider"]]
 modId="luckperms"
 type="optional"

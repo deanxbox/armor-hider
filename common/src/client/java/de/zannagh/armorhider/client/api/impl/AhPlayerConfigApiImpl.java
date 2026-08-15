@@ -3,10 +3,11 @@ package de.zannagh.armorhider.client.api.impl;
 import de.zannagh.armorhider.ArmorHider;
 import de.zannagh.armorhider.api.ArmorHiderPlayerConfigApi;
 import de.zannagh.armorhider.client.ArmorHiderClient;
-import de.zannagh.armorhider.client.net.ClientPacketSender;
+import de.zannagh.armorhider.client.net.ClientSendGate;
 import de.zannagh.armorhider.client.utils.McClientUtils;
 import de.zannagh.armorhider.configuration.ConfigurationProvider;
 import de.zannagh.armorhider.log.DebugLogger;
+import de.zannagh.armorhider.net.AhPackets;
 import de.zannagh.armorhider.net.packets.PlayerConfig;
 import de.zannagh.armorhider.net.packets.ServerWideSettings;
 import de.zannagh.armorhider.server.ServerConfiguration;
@@ -97,7 +98,7 @@ public class AhPlayerConfigApiImpl implements ArmorHiderPlayerConfigApi, Configu
         if (serverConfiguration != null && McClientUtils.isClientConnectedToServer() && clientNetwork != null) {
             ArmorHider.LOGGER.info("Sending to server...");
             // Strip the client-only per-player override map before transmitting (privacy + irrelevant to peers).
-            ClientPacketSender.sendToServer(config.forNetwork());
+            ClientSendGate.send(AhPackets.PLAYER_CONFIG, config.forNetwork());
             ArmorHider.LOGGER.info("Send client config package to server.");
         }
         notifyConfigListeners(config.playerName.getValue());
@@ -168,7 +169,7 @@ public class AhPlayerConfigApiImpl implements ArmorHiderPlayerConfigApi, Configu
         }
         serverConfiguration.serverWideSettings = serverWideSettings;
         ArmorHider.LOGGER.info("Sending server-wide settings to server...");
-        ClientPacketSender.sendToServer(serverWideSettings);
+        ClientSendGate.send(AhPackets.SERVER_WIDE_SETTINGS, serverWideSettings);
     }
 
     @Override

@@ -8,6 +8,34 @@ repositories {
     maven("https://api.modrinth.com/maven") {
         content { includeGroup("maven.modrinth") }
     }
+    // eunomia (de.zannagh.eunomia:eunomia-core) - the MC-free, game-version-agnostic API surface
+    // armor-hider compiles against; the eunomia mod supplies the live transport at runtime. Consumed
+    // compileOnly (see multiloader-loom / multiloader-loader), so this is a compile-time-only source.
+    // GitHub Packages is the portable remote: the repo is public, so ANY valid GitHub token can read it
+    // (not just repo collaborators), but GitHub still requires *a* token for maven artifacts - there is
+    // no anonymous access - so the repo is added only when credentials are present. mavenLocal is the
+    // credential-free local fallback (publish with `./gradlew :core:publishToMavenLocal` in the eunomia
+    // repo), so a build without a read:packages token still resolves. Property/env names mirror eunomia's
+    // own publish convention, so an existing credential setup carries straight over. For fully tokenless
+    // resolution eunomia would need Maven Central.
+    mavenLocal {
+        content { includeGroup("de.zannagh.eunomia") }
+    }
+    val eunomiaGprUser = providers.gradleProperty("gpr.user")
+        .orElse(providers.environmentVariable("GITHUB_ACTOR"))
+    val eunomiaGprToken = providers.gradleProperty("gpr.token")
+        .orElse(providers.environmentVariable("GITHUB_TOKEN"))
+    if (eunomiaGprUser.isPresent && eunomiaGprToken.isPresent) {
+        maven {
+            name = "EunomiaGitHubPackages"
+            url = uri("https://maven.pkg.github.com/zannagh/eunomia")
+            credentials {
+                username = eunomiaGprUser.get()
+                password = eunomiaGprToken.get()
+            }
+            content { includeGroup("de.zannagh.eunomia") }
+        }
+    }
 }
 
 val sc = project.stonecutterBuild

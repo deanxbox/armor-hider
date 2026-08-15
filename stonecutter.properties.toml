@@ -2,6 +2,9 @@
 maven_group = "de.zannagh.armorhider"
 archives_base_name = "armor-hider"
 loader_version = "0.18.4"
+# eunomia-core compile-time API version. Version-agnostic (no MC suffix), so one value covers every
+# variant. Consumed compileOnly; the eunomia mod supplies the runtime. Matches eunomia's release tag.
+eunomia.version = "0.2.2"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Per MC version - shared between fabric and neoforge for the same game version.

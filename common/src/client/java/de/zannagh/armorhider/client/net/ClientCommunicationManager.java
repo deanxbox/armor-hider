@@ -4,84 +4,45 @@ import de.zannagh.armorhider.ArmorHider;
 import de.zannagh.armorhider.api.ArmorHiderApi;
 import de.zannagh.armorhider.client.ArmorHiderClient;
 import de.zannagh.armorhider.client.utils.McClientUtils;
-import de.zannagh.armorhider.net.packets.HandshakePacket;
 import net.minecraft.network.chat.Component;
 import de.zannagh.armorhider.combat.DefaultCombatEvent;
 import de.zannagh.armorhider.log.DebugLogger;
+import de.zannagh.armorhider.net.AhPackets;
 import de.zannagh.armorhider.net.packets.CombatLogNotificationPacket;
 import de.zannagh.armorhider.net.packets.PermissionPacket;
 import de.zannagh.armorhider.server.ServerConfiguration;
 import de.zannagh.armorhider.util.PlayerNameUtil;
+import de.zannagh.eunomia.networking.CommunicationManager;
 import net.minecraft.client.multiplayer.ServerData;
 
-//? if >= 1.20.5
-import de.zannagh.armorhider.net.PayloadRegistry;
-//? if < 1.20.5
-//import de.zannagh.armorhider.net.LegacyPacketHandler;
-
 /**
- * Client-side communication manager.
- * Handles packet registration and events without Fabric API.
+ * Client-side communication manager, wired against eunomia's {@link CommunicationManager}.
+ * <p>
+ * The historical "server supports the mod" signal is now eunomia's capability handshake: whether the
+ * server runs Armor Hider is {@code CommunicationManager.serverCapabilities().isPresent()}. Outgoing
+ * C2S traffic is gated through {@link ClientSendGate} accordingly.
  */
 public final class ClientCommunicationManager {
 
-    /**
-     * Whether the connected server has proven it runs Armor Hider (by sending a
-     * {@link HandshakePacket}). Written on the netty/client thread from the handshake handler, the
-     * join handler and the disconnect handler; read off-thread by {@link ClientPacketSender}'s waiter,
-     * hence {@code volatile}. Reset to {@code false} on every disconnect.
-     */
-    public static volatile boolean SERVER_SUPPORTS_MOD;
-
     public static void initClient() {
-        //? if >= 1.20.5 {
-        PayloadRegistry.registerS2CHandler(ServerConfiguration.TYPE, ctx -> ClientCommunicationManager.handleServerConfigReceived(ctx.payload()));
-        PayloadRegistry.registerS2CHandler(PermissionPacket.TYPE, ctx -> ClientCommunicationManager.handlePermissionPacketReceived(ctx.payload()));
-        PayloadRegistry.registerS2CHandler(CombatLogNotificationPacket.TYPE, ctx -> ClientCommunicationManager.handleCombatLogNotificationReceived(ctx.payload()));
-        PayloadRegistry.registerS2CHandler(HandshakePacket.TYPE, ctx -> ClientCommunicationManager.handleHandshakePacketReceived(ctx.payload()));
-        //?}
+        CommunicationManager.onClientReceive(AhPackets.SERVER_CONFIG,
+                (payload, ctx) -> handleServerConfigReceived(payload));
+        CommunicationManager.onClientReceive(AhPackets.PERMISSION,
+                (payload, ctx) -> handlePermissionPacketReceived(payload));
+        CommunicationManager.onClientReceive(AhPackets.COMBAT_NOTIFICATION,
+                (payload, ctx) -> handleCombatLogNotificationReceived(payload));
 
-        //? if < 1.20.5 {
-        /*LegacyPacketHandler.registerS2CHandler(LegacyPacketHandler.getServerConfigChannel(), ctx -> {
-            if (!(ctx.payload() instanceof ServerConfiguration payload)) {
-                return;
-            }
-            handleServerConfigReceived(payload);
-        });
-
-        LegacyPacketHandler.registerS2CHandler(LegacyPacketHandler.getPermissionChannel(), ctx -> {
-            if (!(ctx.payload() instanceof PermissionPacket payload)) {
-                return;
-            }
-            handlePermissionPacketReceived(payload);
-        });
-
-        LegacyPacketHandler.registerS2CHandler(LegacyPacketHandler.getCombatLogNotificationChannel(), ctx -> {
-            if (!(ctx.payload() instanceof CombatLogNotificationPacket payload)) {
-                return;
-            }
-            handleCombatLogNotificationReceived(payload);
-        });
-
-        LegacyPacketHandler.registerS2CHandler(LegacyPacketHandler.getHandshakeChannel(), ctx -> {
-            if (!(ctx.payload() instanceof HandshakePacket payload)) {
-                return;
-            }
-            handleHandshakePacketReceived(payload);
-        });
-        *///?}
+        // Consume eunomia's server-capability probe results, and gate our C2S sends on them.
+        CommunicationManager.enableClientHandshake();
+        ClientSendGate.install();
 
         ClientConnectionEvents.registerJoin((handler, client) -> {
             if (client.player == null) {
                 return;
             }
-            // Start every connection assuming the server does NOT run the mod. Relying only on the
-            // disconnect handler to clear this is unsafe: a stale true (from singleplayer or an
-            // incomplete disconnect) would let the gate treat the next - possibly vanilla - server as
-            // supported and send it custom payloads before any handshake, risking a kick. The handshake
-            // handler (or the local-server shortcut below) re-sets it to true when appropriate.
-            SERVER_SUPPORTS_MOD = false;
-            ClientPacketSender.reset();
+            // Re-gate outgoing traffic for the new connection. eunomia's own client wiring re-probes
+            // the server (HELLO on join); this only clears our queued sends from any prior connection.
+            ClientSendGate.reset();
             var playerName = PlayerNameUtil.getPlayerName(client.player);
             if (playerName == null || playerName.isBlank()) {
                 //? if >= 1.21.9
@@ -112,16 +73,15 @@ public final class ClientCommunicationManager {
             }
 
             if (!McClientUtils.isClientConnectedToServer()) {
-                SERVER_SUPPORTS_MOD = true;
                 ArmorHiderClient.permissionLevel = 4; // local -> admin
             }
 
-            // A send failure must never abort the join. ClientPacketSender already swallows the
+            // A send failure must never abort the join. ClientSendGate already swallows the
             // "server doesn't know this channel" case, but the encoder can still reject an oversized
             // payload and the connection can drop between the check and the write - neither is worth
             // taking the client down for, since the config is client-authoritative anyway.
             try {
-                ClientPacketSender.sendToServer(currentConfig.forNetwork());
+                ClientSendGate.send(AhPackets.PLAYER_CONFIG, currentConfig.forNetwork());
             } catch (Exception e) {
                 ArmorHider.LOGGER.warn("Could not send the local config to the server on join.", e);
             }
@@ -140,14 +100,8 @@ public final class ClientCommunicationManager {
             // Drop the transient keybind override so the next connection starts from the persisted baseline.
             ArmorHiderClient.CLIENT_CONFIG_MANAGER.clearSessionDisableOverride();
             ArmorHiderClient.permissionLevel = 0;
-            SERVER_SUPPORTS_MOD = false;
-            ClientPacketSender.reset();
+            ClientSendGate.reset();
         });
-    }
-
-    private static void handleHandshakePacketReceived(de.zannagh.armorhider.net.packets.HandshakePacket payload) {
-        ArmorHider.LOGGER.info("Received handshake packet from session: {}", payload.sessionId);
-        SERVER_SUPPORTS_MOD = true;
     }
 
     private static void handleServerConfigReceived(ServerConfiguration ctx) {
