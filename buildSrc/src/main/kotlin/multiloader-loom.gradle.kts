@@ -463,6 +463,15 @@ if (branch == "fabric") {
                 // FCGT names this property in that very error message. Required for any gametest
                 // that joins a server - the codec injection is load-bearing and cannot be dropped.
                 jvmArguments.add("-Dfabric.client.gametest.disableNetworkSynchronizer=true")
+                // Keep the gametest window from stealing focus on macOS (it otherwise pops to the
+                // foreground and kicks the developer out of any fullscreen app every FCGT loop). The
+                // GLFW era (26.1.2 / 26.2) is handled by WindowFocusMixin, which sets GLFW's focus hints
+                // before window creation (the process-level -Dapple.awt.UIElement hint does NOT work -
+                // GLFW forces its own Regular activation policy). 26.3 uses SDL, which reads these hint
+                // env vars before creating the window; "0" tells it not to activate/raise-to-front on
+                // show. Harmless off macOS / when the backend isn't in use.
+                environmentVariable("SDL_WINDOW_ACTIVATE_WHEN_SHOWN", "0")
+                environmentVariable("SDL_WINDOW_ACTIVATE_WHEN_RAISED", "0")
             }
         }
         // Resolve the FCGT module artifact via a dedicated configuration so we can copy the
@@ -475,10 +484,26 @@ if (branch == "fabric") {
             isVisible = false
         }
         val fabricApiExt = project.extensions.getByType(net.fabricmc.loom.api.fabricapi.FabricApiExtension::class.java)
+        val fabricApiSemver = findProperty("fabricapi.semver")!!.toString()
         dependencies.add(
             "fcgtRuntimeMod",
-            fabricApiExt.module("fabric-client-gametest-api-v1", findProperty("fabricapi.semver")!!.toString())
+            fabricApiExt.module("fabric-client-gametest-api-v1", fabricApiSemver)
         )
+        // FCGT 6.x (26.3+) hard-depends on fabric-resource-loader-v1, but that's a runtime (fabric.mod.json)
+        // dependency, not a Gradle-transitive one, so copying only the FCGT module leaves it missing and the
+        // client aborts at boot ("requires fabric-resource-loader-v1, which is missing"). Older nodes only
+        // booted because a prior -Psmoke run happened to leave the full fabric-api umbrella (which bundles
+        // it) in run/mods. Provision it explicitly so FCGT boots on a clean run/mods where it's needed.
+        // Fabric-loader deduplicates it against any umbrella-bundled copy, so this is safe where one exists.
+        // fabricApiExt.module resolves the submodule version from the pinned fabric-api's module list, so on
+        // older fabric-api lines (1.21.4..1.21.11) that predate the resource-loader-v1 module it throws
+        // "Failed to find module version" - those run FCGT 5.x, which doesn't need it, so just skip there.
+        runCatching {
+            dependencies.add(
+                "fcgtRuntimeMod",
+                fabricApiExt.module("fabric-resource-loader-v1", fabricApiSemver)
+            )
+        }
         val copyFcgtToMods = tasks.register<Copy>("copyFcgtToMods") {
             group = "verification"
             description = "Drop the FCGT module jar into run/mods/ so its mixin plugin loads at runtime"
