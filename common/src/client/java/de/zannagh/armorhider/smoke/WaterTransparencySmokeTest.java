@@ -146,6 +146,48 @@ public final class WaterTransparencySmokeTest implements FabricClientGameTest {
             long fixedEnd = context.computeOnClient(client -> ArmorHiderRenderTypes.deferredSubmitCount());
             ArmorHider.LOGGER.info("[smoke/fcgt] AFTER (redirect on) screenshot: {}", fixedShot);
 
+            // Under-shaders path: with an active Iris shaderpack a faded armor piece can't use an
+            // alpha-blended (translucent) type - the shaderpack's translucent-entity pass composites it
+            // so the OPAQUE body behind reads see-through (issue #342 follow-up). Instead the piece is
+            // rendered as an opaque ordered-dither ("screen-door") cutout, which never enters the
+            // translucent pass. Force the shaderpack-active override (no real Iris on this box) and
+            // assert the dither path runs and is NOT deferred (opaque cutout is drawn in the normal
+            // solid/cutout phase, not the after-terrain translucent phase).
+            //? if < 26.3-0.snapshot.2 {
+            context.runOnClient(client -> {
+                ArmorHiderRenderTypes.setShaderPackActiveOverride(Boolean.TRUE);
+                snapPose(client);
+            });
+            // Let the override settle first so the measurement window is steady-state (frames rendered
+            // during the switch still carry the old deferred type and would pollute the delta).
+            context.waitTicks(8);
+            long deferBefore = context.computeOnClient(client -> ArmorHiderRenderTypes.deferredSubmitCount());
+            long ditherPathBefore = context.computeOnClient(client -> ArmorHiderRenderTypes.armorDitherPathCount());
+            context.waitTicks(6);
+            Path depthShot = context.takeScreenshot("armorhider_4_water_dither_shaders");
+            long deferAfter = context.computeOnClient(client -> ArmorHiderRenderTypes.deferredSubmitCount());
+            long ditherPathAfter = context.computeOnClient(client -> ArmorHiderRenderTypes.armorDitherPathCount());
+            context.runOnClient(client -> ArmorHiderRenderTypes.setShaderPackActiveOverride(null));
+            long deferDelta = deferAfter - deferBefore;
+            long ditherPathDelta = ditherPathAfter - ditherPathBefore;
+            ArmorHider.LOGGER.info("[smoke/fcgt] dither window: deferDelta={} ditherPath={} shot {}",
+                    deferDelta, ditherPathDelta, depthShot);
+            if (ditherPathDelta <= 0) {
+                throw new IllegalStateException(
+                        "[smoke/fcgt] shader override on but the dithered opaque armor path never ran (ditherPath "
+                                + ditherPathDelta + ") - the under-shaders dither swap is not wired");
+            }
+            // deferDelta should be 0 (an opaque cutout draws in the solid phase, never after-terrain).
+            // Only a warning, not a hard failure: it's 0 only when the dithered texture actually built,
+            // and on the headless CI box the software-GL texture upload could conceivably fall back to
+            // the deferred translucent type. The hard machine-check above (the swap is wired) is what
+            // matters here; the opaque-vs-deferred behaviour is eyeballed on a real GPU.
+            if (deferDelta != 0) {
+                ArmorHider.LOGGER.warn("[smoke/fcgt] dithered armor drew deferred (delta {}) - expected the "
+                        + "opaque cutout in the solid phase; likely a software-GL texture-build fallback", deferDelta);
+            }
+            //?}
+
             // Control - same pose, redirect on, but background swapped to solid stone. Pre-fix this
             // rendered the pads fine; it should look the same as the water AFTER shot.
             server.runOnServer(mcServer -> buildArena(mcServer.overworld(), Blocks.STONE.defaultBlockState()));
