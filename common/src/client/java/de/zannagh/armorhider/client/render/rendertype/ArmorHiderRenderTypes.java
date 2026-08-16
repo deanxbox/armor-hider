@@ -154,37 +154,6 @@ public final class ArmorHiderRenderTypes {
         return FIRST_PERSON_LAYER_GUARDS.get();
     }
 
-    // Diagnostic counter: how many times a faded enchanted armor piece had its glint pass swapped onto
-    // our translucent glint render type (issue #324). Vanilla draws the armor glint as a separate
-    // additive pass that depth-tests EQUAL against the base armor's depth; our translucent base
-    // disables depth writes, so that EQUAL test fails and the glint vanishes. The swap re-issues the
-    // glint on a pipeline sharing the translucent base's depth state so it co-draws. The glint smoke
-    // asserts this climbs while a faded enchanted chest is on screen, pinning that the wrap fired.
-    private static final java.util.concurrent.atomic.AtomicLong ARMOR_GLINT_SWAPS =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    public static void recordArmorGlintSwap() {
-        ARMOR_GLINT_SWAPS.incrementAndGet();
-    }
-
-    public static long armorGlintSwapCount() {
-        return ARMOR_GLINT_SWAPS.get();
-    }
-
-    // Test-only diagnostic switch, mirroring deferralEnabled. Flipped off, the glint pass keeps the
-    // vanilla armorEntityGlint type (the pre-fix behaviour where the glint's EQUAL depth test fails
-    // against our no-depth-write base and the glint vanishes on faded armor). The glint smoke toggles
-    // this to capture a before/after pair with identical framing. Always true in normal play.
-    private static volatile boolean glintSwapEnabled = true;
-
-    public static void setGlintSwapEnabled(boolean enabled) {
-        glintSwapEnabled = enabled;
-    }
-
-    public static boolean isGlintSwapEnabled() {
-        return glintSwapEnabled;
-    }
-
     // Test-only diagnostic switch, mirroring deferralEnabled below. Flipped off, FirstPersonCompat's
     // predicates all report false, restoring the unguarded behaviour so the first-person smoke can
     // observe the scope leak and its absence in a single run. Always true in normal play.
@@ -242,7 +211,7 @@ public final class ArmorHiderRenderTypes {
         shaderPackActiveOverride = value;
     }
 
-    private static boolean armorShouldWriteDepth() {
+    public static boolean armorShouldWriteDepth() {
         Boolean override = shaderPackActiveOverride;
         return override != null ? override : isShaderPackActive();
     }
@@ -556,19 +525,67 @@ public final class ArmorHiderRenderTypes {
 
     // --- Public API ---
 
+    // Diagnostic: how many times translucentArmor returned the depth-writing vs the no-depth type.
+    private static final java.util.concurrent.atomic.AtomicLong ARMOR_DEPTH_PATH =
+            new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong ARMOR_NODEPTH_PATH =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    public static long armorDepthPathCount() {
+        return ARMOR_DEPTH_PATH.get();
+    }
+
+    public static long armorNoDepthPathCount() {
+        return ARMOR_NODEPTH_PATH.get();
+    }
+
+    /**
+     * Opaque cutout armor type backed by a dithered (screen-door) copy of {@code base} approximating
+     * {@code opacity}, for the under-shaders path. Returns {@code null} where unavailable (caller falls
+     * back to the translucent type). See {@link de.zannagh.armorhider.client.render.ShaderDitheredArmorTextures}.
+     */
+    public static RenderType ditheredArmorCutout(Identifier base, float opacity, de.zannagh.armorhider.net.packets.PlayerConfig config) {
+        //? if >= 26.2-1.pre && < 26.3-0.snapshot.2 {
+        // Count the decision to take the dither path (the swap is wired) up front, independent of
+        // whether the texture upload succeeds - the smoke tests assert on this like the other paths.
+        ARMOR_DITHER_PATH.incrementAndGet();
+        Identifier derived = de.zannagh.armorhider.client.render.ShaderDitheredArmorTextures
+                .ditheredTexture(base, opacity, config);
+        if (derived == null) {
+            return null;
+        }
+        return net.minecraft.client.renderer.rendertype.RenderTypes.armorCutoutNoCull(derived);
+        //?} else {
+        /*return null;
+        *///?}
+    }
+
+    // Diagnostic: how many times a faded armor piece was routed onto the under-shaders dithered
+    // opaque-cutout type (the fix for the Iris see-through-body bug). Asserted by the smoke tests,
+    // mirroring the depth/no-depth path counters, since the swap fails silently on a target drift.
+    private static final java.util.concurrent.atomic.AtomicLong ARMOR_DITHER_PATH =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    public static long armorDitherPathCount() {
+        return ARMOR_DITHER_PATH.get();
+    }
+
     public static RenderType translucentArmor(Identifier texture) {
         // Under an active shaderpack, hand back the depth-writing armor type so the body under faded
         // armor stops reading see-through at grazing angles. Safe only where the deferral covers water.
         //? if >= 26.2-1.pre && < 26.3-0.snapshot.2 {
         if (armorShouldWriteDepth()) {
-            // Use Minecraft's own depth-writing pipeline here. Iris' public assignPipeline API only
-            // registers custom pipelines for the main pass, so a cloned pipeline is missing from the
-            // shadow override map and produces broken/invisible armor and wings with shader packs.
-            RenderType renderType = RenderTypes.armorTranslucent(texture);
-            DEFERRED_TYPES.add(renderType);
-            return renderType;
+            ARMOR_DEPTH_PATH.incrementAndGet();
+            // Use Minecraft's own depth-writing armor pipeline rather than a clone of it: Iris'
+            // public assignPipeline API only registers custom pipelines for the main pass, so a
+            // cloned pipeline is missing from the shadow override map and renders armor and elytra
+            // wings broken/invisible under a shaderpack. Deliberately NOT added to DEFERRED_TYPES,
+            // for the same reason the clone never was: under a shaderpack the faded piece must draw
+            // as an ordinary translucent entity, and the depth write handles water occlusion.
+            return RenderTypes.armorTranslucent(texture);
         }
         //?}
+        ARMOR_NODEPTH_PATH.incrementAndGet();
         RenderType renderType = TRANSLUCENT_ARMOR.apply(texture);
         DEFERRED_TYPES.add(renderType);
         return renderType;
@@ -597,251 +614,4 @@ public final class ArmorHiderRenderTypes {
         return TRANSLUCENT_ITEM_SHEET;
     }
 
-    // --- Enchantment glint on translucent armor (issue #324) ---
-    // On 1.21.5..<26.3 the armor glint is a SEPARATE additive pass (RenderPipelines.GLINT) that
-    // depth-tests EQUAL against the depth the base armor wrote. Our translucent base disables depth
-    // writes, so the glint's EQUAL test fails everywhere and the glint vanishes on faded armor. We
-    // re-issue the glint on a clone of the GLINT pipeline that carries the translucent base's depth
-    // state (GREATER_THAN_OR_EQUAL, no depth write) so it co-draws wherever the faded armor draws.
-    // (< 1.21.5 is the RenderStateShard/CompositeState era, handled in the final else below.)
-    //? if >= 1.21.5 && < 26.1-0.snapshot.10 {
-    /*// 1.21.5..<26.1-snapshot-10: the RenderPipeline exposes its depth state as a plain
-    // getDepthTestFunction()/isWrite* pair (no DepthStencilState). Clone vanilla's GLINT pipeline,
-    // forcing the depth test to match our translucent armor base (ARMOR_TRANSLUCENT) and disabling
-    // depth writes, so the glint co-draws wherever the faded armor draws instead of failing the
-    // vanilla glint's EQUAL test against a depth value our no-depth-write base never wrote.
-    private static RenderPipeline cloneGlintCoDraw(RenderPipeline src, Identifier location) {
-        var snippet = new RenderPipeline.Snippet(
-                Optional.of(src.getVertexShader()), Optional.of(src.getFragmentShader()),
-                Optional.of(src.getShaderDefines()), Optional.of(src.getSamplers()),
-                Optional.of(src.getUniforms()), src.getBlendFunction(),
-                Optional.of(RenderPipelines.ARMOR_TRANSLUCENT.getDepthTestFunction()), Optional.of(src.getPolygonMode()),
-                Optional.of(src.isCull()), Optional.of(src.isWriteColor()),
-                Optional.of(src.isWriteAlpha()), Optional.of(false),
-                Optional.of(src.getColorLogic()), Optional.of(src.getVertexFormat()),
-                Optional.of(src.getVertexFormatMode()));
-        return RenderPipeline.builder(snippet)
-                .withLocation(location)
-                .withDepthBias(src.getDepthBiasScaleFactor(), src.getDepthBiasConstant())
-                .build();
-    }
-
-    private static final RenderPipeline ARMOR_GLINT_TRANSLUCENT_CODRAW = cloneGlintCoDraw(
-            RenderPipelines.GLINT,
-            Identifier.fromNamespaceAndPath("armor_hider", "pipeline/armor_glint_translucent_codraw"));
-
-    //? if >= 1.21.11 {
-    private static final RenderType TRANSLUCENT_ARMOR_GLINT = RenderType.create(
-            "armor_hider_armor_glint_translucent",
-            RenderSetup.builder(ARMOR_GLINT_TRANSLUCENT_CODRAW)
-                    .withTexture("Sampler0", net.minecraft.client.renderer.entity.ItemRenderer.ENCHANTED_GLINT_ARMOR)
-                    .setTextureTransform(net.minecraft.client.renderer.rendertype.TextureTransform.ARMOR_ENTITY_GLINT_TEXTURING)
-                    .setLayeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING)
-                    .createRenderSetup());
-    //? } else {
-    /^private static final RenderType TRANSLUCENT_ARMOR_GLINT = RenderType.create(
-            "armor_hider_armor_glint_translucent", 1536, true, true,
-            ARMOR_GLINT_TRANSLUCENT_CODRAW,
-            RenderType.CompositeState.builder()
-                    .setTextureState(new RenderStateShard.TextureStateShard(
-                            net.minecraft.client.renderer.entity.ItemRenderer.ENCHANTED_GLINT_ARMOR, false))
-                    .setTexturingState(ARMOR_ENTITY_GLINT_TEXTURING)
-                    .setLayeringState(VIEW_OFFSET_Z_LAYERING)
-                    .createCompositeState(false));
-    ^///?}
-
-    /^*
-     * The translucent-armor glint render type for the reported case: a faded enchanted piece. Deferred
-     * with the base so it draws in the same after-terrain phase and, sharing the base's depth state,
-     * appears wherever the faded armor does instead of failing the vanilla glint's EQUAL depth test.
-     * Returns {@code original} unchanged when the glint swap is toggled off (test only).
-     ^/
-    public static RenderType translucentArmorGlint(RenderType original) {
-        if (!glintSwapEnabled) {
-            return original;
-        }
-        DEFERRED_TYPES.add(TRANSLUCENT_ARMOR_GLINT);
-        recordArmorGlintSwap();
-        return TRANSLUCENT_ARMOR_GLINT;
-    }
-    *///? } elif >= 26.1-0.snapshot.10 && < 26.2-1.pre {
-    /*// 26.1-snapshot-10..<26.2: the RenderPipeline exposes a DepthStencilState. Borrow our translucent
-    // armor base's DepthStencilState (depth test matching ARMOR_TRANSLUCENT, depth writes disabled) so
-    // the cloned GLINT pipeline co-draws wherever the faded armor draws.
-    private static RenderPipeline cloneGlintCoDraw(RenderPipeline src, Identifier location) {
-        var dss = ARMOR_TRANSLUCENT_NO_DEPTH.getDepthStencilState();
-        var snippet = new RenderPipeline.Snippet(
-                Optional.of(src.getVertexShader()), Optional.of(src.getFragmentShader()),
-                Optional.of(src.getShaderDefines()), Optional.of(src.getSamplers()),
-                Optional.of(src.getUniforms()), Optional.of(src.getColorTargetState()),
-                Optional.of(dss), Optional.of(src.getPolygonMode()),
-                Optional.of(src.isCull()), Optional.of(src.getVertexFormat()),
-                Optional.of(src.getVertexFormatMode()));
-        return RenderPipeline.builder(snippet).withLocation(location).build();
-    }
-
-    private static final RenderPipeline ARMOR_GLINT_TRANSLUCENT_CODRAW = cloneGlintCoDraw(
-            RenderPipelines.GLINT,
-            Identifier.fromNamespaceAndPath("armor_hider", "pipeline/armor_glint_translucent_codraw"));
-
-    private static final RenderType TRANSLUCENT_ARMOR_GLINT = RenderType.create(
-            "armor_hider_armor_glint_translucent",
-            RenderSetup.builder(ARMOR_GLINT_TRANSLUCENT_CODRAW)
-                    .withTexture("Sampler0", net.minecraft.client.renderer.feature.ItemFeatureRenderer.ENCHANTED_GLINT_ARMOR)
-                    .setTextureTransform(net.minecraft.client.renderer.rendertype.TextureTransform.ARMOR_ENTITY_GLINT_TEXTURING)
-                    .setLayeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING)
-                    .createRenderSetup());
-
-    public static RenderType translucentArmorGlint(RenderType original) {
-        if (!glintSwapEnabled) {
-            return original;
-        }
-        DEFERRED_TYPES.add(TRANSLUCENT_ARMOR_GLINT);
-        recordArmorGlintSwap();
-        return TRANSLUCENT_ARMOR_GLINT;
-    }
-    *///? } elif >= 26.2-1.pre && < 26.3-0.snapshot.2 {
-    private static RenderPipeline cloneGlintCoDraw(RenderPipeline src, Identifier location) {
-        // Borrow the exact depth state of our translucent armor base so the glint draws under the same
-        // depth rules (and, like the base, writes no depth).
-        var dss = ARMOR_TRANSLUCENT_NO_DEPTH.getDepthStencilState();
-        var snippet = new RenderPipeline.Snippet(
-                Optional.of(src.getVertexShader()), Optional.of(src.getFragmentShader()),
-                Optional.of(src.getShaderDefines()), Optional.of(src.getBindGroupLayouts()),
-                src.getColorTargetStates(), src.getColorTargetStates().length,
-                Optional.of(dss), Optional.of(src.getPolygonMode()),
-                Optional.of(src.isCull()), src.getVertexFormatBindings(),
-                Optional.of(src.getPrimitiveTopology()));
-        return RenderPipeline.builder(snippet).withLocation(location).build();
-    }
-
-    private static final RenderPipeline ARMOR_GLINT_TRANSLUCENT_CODRAW = cloneGlintCoDraw(
-            RenderPipelines.GLINT,
-            Identifier.fromNamespaceAndPath("armor_hider", "pipeline/armor_glint_translucent_codraw"));
-
-    private static final RenderType TRANSLUCENT_ARMOR_GLINT = RenderType.create(
-            "armor_hider_armor_glint_translucent",
-            RenderSetup.builder(ARMOR_GLINT_TRANSLUCENT_CODRAW)
-                    .withTexture("Sampler0", net.minecraft.client.renderer.feature.ItemFeatureRenderer.ENCHANTED_GLINT_ARMOR)
-                    .setTextureTransform(net.minecraft.client.renderer.rendertype.TextureTransform.ARMOR_ENTITY_GLINT_TEXTURING)
-                    .setLayeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING)
-                    .createRenderSetup());
-
-    /**
-     * The translucent-armor glint render type for the reported case: a faded enchanted piece. Deferred
-     * with the base so it draws in the same after-terrain phase and, sharing the base's depth state,
-     * appears wherever the faded armor does instead of failing the vanilla glint's EQUAL depth test.
-     * On version eras this fix does not yet cover, returns {@code original} unchanged (glint stays
-     * vanilla).
-     */
-    public static RenderType translucentArmorGlint(RenderType original) {
-        // With shaders the base uses Minecraft's depth-writing armor pipeline, so vanilla's EQUAL
-        // glint pass works and is already registered in both Iris' main and shadow maps.
-        if (!glintSwapEnabled || armorShouldWriteDepth()) {
-            return original;
-        }
-        DEFERRED_TYPES.add(TRANSLUCENT_ARMOR_GLINT);
-        recordArmorGlintSwap();
-        return TRANSLUCENT_ARMOR_GLINT;
-    }
-    //?} elif >= 26.3-0.snapshot.2 {
-    /*// 26.3 fuses the glint into the entity shader: armorCutoutNoCullGlint(texture) is a single
-    // combined armor+glint draw (RenderPipelines.ARMOR_CUTOUT_NO_CULL_GLINT, opaque). We clone it to a
-    // translucent, depth-write-disabled variant so a faded enchanted piece keeps its glint and fades
-    // with it (the ENTITY vertex format carries colour here, so the glint fades too). Keyed by armor
-    // texture, since the glint is composited with the piece's own texture in one pass.
-    private static RenderPipeline cloneGlintTranslucent(RenderPipeline src, Identifier location) {
-        var dss = ARMOR_TRANSLUCENT_NO_DEPTH.getDepthStencilState();
-        var translucent = new ColorTargetState[]{
-                new ColorTargetState(com.mojang.renderpearl.api.pipeline.BlendFunction.TRANSLUCENT)
-        };
-        var snippet = new RenderPipeline.Snippet(
-                src.getShaders(),
-                Optional.of(src.getShaderDefines()), Optional.of(src.getBindGroupLayouts()),
-                translucent, translucent.length,
-                Optional.of(dss), Optional.of(src.getPolygonMode()),
-                Optional.of(src.isCull()), src.getVertexFormatBindings().toArray(new com.mojang.renderpearl.api.vertex.VertexFormat[0]),
-                Optional.of(src.getPrimitiveTopology()), src.pushConstantSize());
-        return RenderPipeline.builder(snippet).withLocation(location).build();
-    }
-
-    private static final RenderPipeline ARMOR_GLINT_TRANSLUCENT_NO_DEPTH = cloneGlintTranslucent(
-            RenderPipelines.ARMOR_CUTOUT_NO_CULL_GLINT,
-            Identifier.fromNamespaceAndPath("armor_hider", "pipeline/armor_glint_translucent_no_depth"));
-
-    private static final Function<Identifier, RenderType> TRANSLUCENT_ARMOR_GLINT = memoize(
-            texture -> RenderType.create("armor_hider_armor_glint_translucent",
-                    RenderSetup.builder(ARMOR_GLINT_TRANSLUCENT_NO_DEPTH)
-                            .setOitPipelines(RenderPipelines.OIT_ENTITY)
-                            .withTexture("Sampler0", texture)
-                            .withTexture("GlintSampler", net.minecraft.client.renderer.feature.ItemFeatureRenderer.ENCHANTED_GLINT_ARMOR)
-                            .setTextureTransform(net.minecraft.client.renderer.rendertype.TextureTransform.ARMOR_ENTITY_GLINT_TEXTURING)
-                            .useLightmap()
-                            .useOverlay()
-                            .setLayeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING)
-                            .affectsCrumbling()
-                            .setOutline(RenderSetup.OutlineProperty.AFFECTS_OUTLINE)
-                            .createRenderSetup()));
-
-    /^*
-     * The 26.3 combined (armor + shader glint) translucent render type for a faded enchanted piece,
-     * keyed by the piece's armor texture. Deferred with the base so it draws in the same after-terrain
-     * phase. Returns null when the glint-swap toggle is off (test-only), so the caller keeps vanilla.
-     ^/
-    public static RenderType translucentArmorGlint(Identifier texture) {
-        if (!glintSwapEnabled) {
-            return null;
-        }
-        RenderType renderType = TRANSLUCENT_ARMOR_GLINT.apply(texture);
-        DEFERRED_TYPES.add(renderType);
-        recordArmorGlintSwap();
-        return renderType;
-    }
-
-    // Cross-version no-op overload (the 26.2-family separate-glint path calls this; unused on 26.3).
-    public static RenderType translucentArmorGlint(RenderType original) {
-        return original;
-    }
-    *///? } else {
-    /*// < 1.21.5 (1.20.1..1.21.4): the RenderStateShard/CompositeState era. Vanilla armorEntityGlint is a
-    // separate additive POSITION_TEX pass depth-tested EQUAL against the depth the base armor wrote
-    // (issue #324). Our translucent base disables depth writes, so the EQUAL test fails and the glint
-    // vanishes on faded armor. Rebuild the same glint type but with the base's depth test (LEQUAL -
-    // the translucent armor base sets no depth test, so it uses the default LEQUAL) so it co-draws
-    // wherever the faded armor draws. Depth writes stay disabled (COLOR_WRITE), exactly like vanilla.
-    private static final RenderType TRANSLUCENT_ARMOR_GLINT = RenderType.create(
-            "armor_hider_armor_glint_translucent",
-            DefaultVertexFormat.POSITION_TEX, VertexFormat.Mode.QUADS, 1536, false, false,
-            RenderType.CompositeState.builder()
-                    .setShaderState(RENDERTYPE_ARMOR_ENTITY_GLINT_SHADER)
-                    //? if >= 1.21.2 {
-                    .setTextureState(new TextureStateShard(
-                            net.minecraft.client.renderer.entity.ItemRenderer.ENCHANTED_GLINT_ENTITY, TriState.DEFAULT, false))
-                    //?} else {
-                    /^.setTextureState(new TextureStateShard(
-                            net.minecraft.client.renderer.entity.ItemRenderer.ENCHANTED_GLINT_ENTITY, true, false))
-                    ^///?}
-                    .setWriteMaskState(COLOR_WRITE)
-                    .setCullState(NO_CULL)
-                    .setDepthTestState(LEQUAL_DEPTH_TEST)
-                    .setTransparencyState(GLINT_TRANSPARENCY)
-                    .setTexturingState(ENTITY_GLINT_TEXTURING)
-                    .setLayeringState(VIEW_OFFSET_Z_LAYERING)
-                    .createCompositeState(false));
-
-    /^*
-     * The translucent-armor glint render type for a faded enchanted piece (issue #324). Shares the
-     * translucent base's depth test (LEQUAL) with depth writes disabled, so it co-draws wherever the
-     * faded armor draws instead of failing the vanilla glint's EQUAL depth test. Returns
-     * {@code original} unchanged when the glint swap is toggled off (test only).
-     ^/
-    public static RenderType translucentArmorGlint(RenderType original) {
-        if (!glintSwapEnabled) {
-            return original;
-        }
-        DEFERRED_TYPES.add(TRANSLUCENT_ARMOR_GLINT);
-        recordArmorGlintSwap();
-        return TRANSLUCENT_ARMOR_GLINT;
-    }
-    *///?}
 }

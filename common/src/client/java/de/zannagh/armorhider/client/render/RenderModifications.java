@@ -60,14 +60,22 @@ public class RenderModifications implements AhRenderModificationApi {
         if (slotModification.isEmpty() || !slotModification.needsTranslucency()) {
             return originalLayer;
         }
-        return getTranslucentArmorRenderType(texture);
-    }
-
-    public RenderType getTranslucentArmorGlintRenderType(RenderType originalLayer) {
-        if (slotModification.isEmpty() || !slotModification.needsTranslucency()) {
-            return originalLayer;
+        // Under an active Iris shaderpack, an alpha-blended (translucent) armor piece is routed into the
+        // shaderpack's translucent-entity pass, where deferred packs (Complementary, …) composite it so
+        // the OPAQUE body behind the piece reads see-through - the terrain/sky draws through the torso
+        // (issue #342 follow-up). Render an opaque ordered-dither ("screen-door") cutout copy instead:
+        // shader-safe partial opacity that never enters the translucent pass and so never lets the body
+        // read through. Falls back to the translucent type if the dithered texture can't be built.
+        if (ArmorHiderRenderTypes.armorShouldWriteDepth() && slotModification.config().irisPartialTransparencyMode.getValue() != de.zannagh.armorhider.configuration.IrisPartialTransparencyMode.NONE) {
+            RenderType dithered = ArmorHiderRenderTypes.ditheredArmorCutout(
+                    texture,
+                    (float) slotModification.transparency(),
+                    slotModification.config());
+            if (dithered != null) {
+                return dithered;
+            }
         }
-        return ArmorHiderRenderTypes.translucentArmorGlint(originalLayer);
+        return getTranslucentArmorRenderType(texture);
     }
 
     public RenderType getTrimRenderLayer(boolean decal, RenderType originalLayer) {
@@ -136,14 +144,6 @@ public class RenderModifications implements AhRenderModificationApi {
     }
 
     @Override
-    public Object getTranslucentArmorGlintRenderType(Object originalRenderType) {
-        if (originalRenderType instanceof RenderType original) {
-            return getTranslucentArmorGlintRenderType(original);
-        }
-        return originalRenderType;
-    }
-
-    @Override
     public Object getTrimRenderLayer(boolean decal, Object originalRenderType) {
         if (originalRenderType instanceof RenderType original) {
             return getTrimRenderLayer(decal, original);
@@ -202,6 +202,18 @@ public class RenderModifications implements AhRenderModificationApi {
     public RenderType getTranslucentArmorRenderType(Identifier texture) {
         if (customRenderTypeFactory != null){
             return customRenderTypeFactory.getTranslucentArmorRenderType(texture);
+        }
+        // Same under-shaders dither path as the two-arg overload, so callers that reach the render type
+        // through this entry (e.g. the GeckoLib armor hook) also avoid the translucent-pass see-through.
+        if (!slotModification.isEmpty()
+                && slotModification.needsTranslucency()
+                && ArmorHiderRenderTypes.armorShouldWriteDepth()
+                && slotModification.config().irisPartialTransparencyMode.getValue() != de.zannagh.armorhider.configuration.IrisPartialTransparencyMode.NONE) {
+            RenderType dithered = ArmorHiderRenderTypes.ditheredArmorCutout(
+                    texture, (float) slotModification.transparency(), slotModification.config());
+            if (dithered != null) {
+                return dithered;
+            }
         }
         return ArmorHiderRenderTypes.translucentArmor(texture);
     }
@@ -299,7 +311,7 @@ public class RenderModifications implements AhRenderModificationApi {
             }
         }
     }
-    
+
     private static void copyPose(ModelPart from, ModelPart to){
         to.x = from.x;
         to.y = from.y;
