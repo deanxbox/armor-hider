@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import de.zannagh.armorhider.client.api.AhRenderManagementApi;
 import de.zannagh.armorhider.client.api.AhRenderInterceptionRegistryApi;
 import de.zannagh.armorhider.client.common.RenderScope;
+import de.zannagh.armorhider.client.compat.FirstPersonCompat;
 import de.zannagh.armorhider.constants.MixinConstants;
 
 import net.minecraft.client.renderer.entity.layers.CustomHeadLayer;
@@ -60,7 +61,7 @@ public abstract class CustomHeadLayerMixin {
             *///? } else {
             /*(PoseStack poseStack, MultiBufferSource bufferSource, int packedLight, S entity, float limbSwing, float limbSwingAmount, float partialTick, float ageInTicks, float netHeadYaw, float headPitch, CallbackInfo ci) {
             *///? }
-        ah$enterHeadScope(entity, ci);
+        enterHeadScope(entity, ci);
     }
 
     // @At("RETURN") rather than "TAIL": the head layer's submit body is a single guarded if-block,
@@ -78,7 +79,12 @@ public abstract class CustomHeadLayerMixin {
     }
 
     @Unique
-    private static void ah$enterHeadScope(Object state, CallbackInfo ci) {
+    private static void enterHeadScope(Object state, CallbackInfo ci) {
+        // First Person Model cancels this submit outright for the camera entity, so the @At("RETURN")
+        // exit below would never run and the scope would leak into the rest of the frame.
+        if (FirstPersonCompat.suppressesHeadLayer(state)) {
+            return;
+        }
         var result = AhRenderInterceptionRegistryApi.getRenderer(RenderScope.HEAD).interceptFrom(state, ci);
         if (result.shouldCancel() || !result.shouldIntercept()) {
             return;
@@ -90,7 +96,7 @@ public abstract class CustomHeadLayerMixin {
     // resolveSkullRenderType is sometimes called outside CustomHeadLayer.submit (e.g. by mods that
     // resolve skull types during their own render). The HEAD-scope our @Inject(HEAD) of submit
     // would normally bracket isn't active in those paths, so we grab here. But we MUST release
-    // again at RETURN — otherwise the scope leaks into subsequent rendering passes (e.g.
+    // again at RETURN - otherwise the scope leaks into subsequent rendering passes (e.g.
     // ElytraTrims' elytra submission, where SubmitNodeCollectorMixin would then apply head opacity).
     @Unique private static final ThreadLocal<Boolean> armorHider$enteredFromResolve = ThreadLocal.withInitial(() -> Boolean.FALSE);
 
@@ -102,7 +108,7 @@ public abstract class CustomHeadLayerMixin {
     )
     private void grabSkullRenderContext(LivingEntityRenderState livingEntityRenderState, SkullBlock.Type type, CallbackInfoReturnable<RenderType> cir) {
         if (!AhRenderManagementApi.hasScopeModification(RenderScope.HEAD)) {
-            ah$enterHeadScope(livingEntityRenderState, null);
+            enterHeadScope(livingEntityRenderState, null);
             armorHider$enteredFromResolve.set(Boolean.TRUE);
         }
     }

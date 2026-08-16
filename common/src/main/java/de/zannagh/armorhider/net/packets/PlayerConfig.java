@@ -6,7 +6,6 @@ import de.zannagh.armorhider.api.ArmorHiderPlayerConfigApi;
 import de.zannagh.armorhider.configuration.*;
 import de.zannagh.armorhider.configuration.items.*;
 import de.zannagh.armorhider.configuration.items.InCombatUseDefaultArmorSkin;
-import com.google.gson.annotations.Expose;
 //? if >= 1.20.5 {
 import de.zannagh.armorhider.net.CompressedJsonCodec;
 import io.netty.buffer.ByteBuf;
@@ -21,7 +20,8 @@ import java.util.UUID;
 
 //? if >= 1.21.11 {
 import net.minecraft.resources.Identifier;
- //?}
+        //?}
+import org.jspecify.annotations.Nullable;
 //? if >= 1.20.5 && < 1.21.11 {
 /*import net.minecraft.resources.Identifier;
 *///?}
@@ -41,7 +41,15 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
     public int configVersion;
 
     /** The current config schema version. */
-    public static final int CURRENT_CONFIG_VERSION = 11;
+    public static final int CURRENT_CONFIG_VERSION = 15;
+
+    /**
+     * Maximum nesting depth for {@link #globalPlayerOverride}. The override is itself a {@link PlayerConfig},
+     * so the structure is recursive; exactly one level is meaningful and anything deeper is corruption. A
+     * cycle here makes {@code Gson#toJson} blow the stack, which escapes the IOException-only catch in the
+     * save path, so {@link #heal} flattens it rather than trusting the data.
+     */
+    private static final int MAX_GLOBAL_OVERRIDE_DEPTH = 1;
 
     //? if >= 1.21.11 {
     public static final Identifier PACKET_IDENTIFIER = Identifier.fromNamespaceAndPath("de.zannagh.armorhider", "settings_c2s_packet");
@@ -163,9 +171,37 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
      * Gets the configuration item {@link OpacityAffectingElytraItem} that determines whether the chest opacity slider should affect Elytra rendering too.
      *
      * @since AH 0.5.0, schema 1
+     * @deprecated since AH 0.12.14, should not be used. Use {@link ElytraOpacity}.
      */
+    @Deprecated(forRemoval = false, since = "0.12.14")
     @SerializedName(value = "opacityAffectingElytra")
     public @NonNull OpacityAffectingElytraItem opacityAffectingElytra;
+
+    /**
+     * Gets the configuration item {@link ElytraOpacity} that determines the opacity of Elytra rendering.
+     * Replaces {@link OpacityAffectingElytraItem}.
+     *
+     * @since AH 0.12.14, schema 14
+     */
+    @SerializedName(value = "elytraOpacity")
+    public @NonNull ElytraOpacity elytraOpacity;
+
+    /**
+     * Gets the configuration item {@link ElytraInFlight} that determines whether Elytra should be rendered in flight.
+     *
+     * @since AH 0.12.14, schema 14
+     */
+    @SerializedName(value =  "elytraInFlight")
+    public @NonNull ElytraInFlight elytraInFlight;
+
+    /**
+     * Gets the configuration item {@link EnableGlint} that determines whether Elytra should be rendered with glint (when true) or
+     * should be intercepted as usual by the mod (when false).
+     *
+     * @since AH 0.12.14, schema 14
+     */
+    @SerializedName(value = "elytraGlint")
+    public @NonNull EnableGlint elytraGlint;
 
     /**
      * Whether Armor Hider's helmet opacity {@link PlayerConfig helmetOpacity} should affect skulls.<br/><br/>
@@ -256,9 +292,14 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
 
     /**
      * @since AH 0.10.4-pre.1, schema 2
+     * @deprecated since AH 0.12.14, schema 15
      */
+    @Deprecated
     @SerializedName(value = "showSettingsInSkinCustomization")
     public @NonNull ShowSettingsInSkinCustomization showSettingsInSkinCustomization;
+
+    @SerializedName(value = "settingsScreenLocation")
+    public @NonNull SettingsScreenLocation settingsScreenLocation;
 
     /**
      * Gets the configuration item {@link InCombatUseDefaultArmorSkin} that determines whether the player should use the default armor skin in combat instead of one provided by resource packs.
@@ -267,6 +308,17 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
      */
     @SerializedName(value = "inCombatUseDefaultModel")
     public @NonNull InCombatUseDefaultArmorSkin inCombatUseDefaultModel;
+
+    /**
+     * How a custom EMF (Fresh Animations) player model is treated while the body armor is hidden.
+     * Defaults to {@code KEEP} (leave the custom model alone); the opt-in {@code VANILLA} /
+     * {@code VANILLA_SEAMS} modes fall back to vanilla geometry for models that still show a seam.
+     * Only meaningful when Entity Model Features is present.
+     *
+     * @since AH 0.12.x, schema 13
+     */
+    @SerializedName(value = "hiddenModelBehaviour")
+    public @NonNull HiddenModelBehaviour hiddenModelBehaviour;
 
     /**
      * Whether the shield should be drawn at full opacity when the player is blocking, defined via the {@link ShowShieldWhenBlocking} configuration item.<br/><br/>
@@ -317,14 +369,26 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
     /**
      * The client-side, server-independent global override configuration applied to unknown players when
      * {@link #useGlobalOverrideForAllPlayers} is on. Lazily created (left {@code null} until the user enables it) so
-     * the no-arg constructor doesn't recurse — a {@code PlayerConfig} field that always built another
+     * the no-arg constructor doesn't recurse - a {@code PlayerConfig} field that always built another
      * {@code PlayerConfig} would never terminate. Nested overrides never populate their own, so
      * serialization terminates too.
      *
      * @since AH 0.12.0-pre.10, schema 8
      */
     @SerializedName(value = "globalPlayerOverride")
-    public @org.jetbrains.annotations.Nullable PlayerConfig globalPlayerOverride;
+    public @Nullable PlayerConfig globalPlayerOverride;
+
+    @SerializedName(value = "irisDitheringScale")
+    public @NonNull IrisDitheringScale irisDitheringScale;
+
+    @SerializedName(value = "irisDitherPhases")
+    public @NonNull IrisDitherPhases irisDitheringPhases;
+
+    @SerializedName(value = "irisDitherResCap")
+    public @NonNull IrisDitherResCap irisDitheringResCap;
+
+    @SerializedName(value = "irisPartialTransparencyMode")
+    public @NonNull IrisTransparencyMode irisPartialTransparencyMode;
 
     public @NonNull PlayerUuid playerId;
 
@@ -345,11 +409,15 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
         legsOpacity = new ArmorOpacity();
         bootsOpacity = new ArmorOpacity();
         inCombatUseDefaultModel = new InCombatUseDefaultArmorSkin();
+        hiddenModelBehaviour = new HiddenModelBehaviour();
         enableCombatDetection = new CombatDetection();
         playerId = new PlayerUuid();
         playerName = new PlayerName();
         opacityAffectingHatOrSkull = new OpacityAffectingHatOrSkullItem();
         opacityAffectingElytra = new OpacityAffectingElytraItem();
+        elytraOpacity = new ElytraOpacity();
+        elytraInFlight = new ElytraInFlight();
+        elytraGlint = new EnableGlint();
         affectAccessories = new AffectAccessories();
         affectHeadAccessory = new AffectHeadAccessory();
         affectChestAccessory = new AffectChestAccessory();
@@ -370,6 +438,12 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
         useGlobalOverrideForAllPlayers = new UseGlobalOverrideForAllPlayers();
         // globalPlayerOverride is intentionally left null here (lazy) to avoid infinite ctor recursion.
         exclusionItems = ExclusionItemConfiguration.defaults();
+        settingsScreenLocation = new SettingsScreenLocation();
+
+        irisDitheringScale = new IrisDitheringScale();
+        irisDitheringPhases = new IrisDitherPhases();
+        irisDitheringResCap = new IrisDitherResCap();
+        irisPartialTransparencyMode = new IrisTransparencyMode();
     }
 
     public @NonNull ExclusionItemConfiguration getExclusionItems() {
@@ -377,11 +451,91 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
     }
 
     public static PlayerConfig deserialize(Reader reader) {
-        return ArmorHider.GSON.fromJson(reader, PlayerConfig.class);
+        return heal(ArmorHider.GSON.fromJson(reader, PlayerConfig.class));
     }
 
     public static PlayerConfig deserialize(String content) {
-        return ArmorHider.GSON.fromJson(content, PlayerConfig.class);
+        return heal(ArmorHider.GSON.fromJson(content, PlayerConfig.class));
+    }
+
+    /**
+     * Repairs a freshly-deserialized config in place and returns it.
+     * <p>
+     * This is deliberately <em>separate from and independent of</em> {@link #migrate}. Migration only runs
+     * when {@code configVersion < CURRENT_CONFIG_VERSION}, so a config that is already at the current version
+     * but has been corrupted at runtime would otherwise be loaded and used verbatim - which is exactly how a
+     * config that grew a multi-megabyte exclusion map, or a non-finite opacity, survives a restart and even a
+     * reinstall of the mod. Healing therefore runs unconditionally on every deserialize, from disk and from
+     * the network alike.
+     * <p>
+     * Opacity clamping is not done here: it lives in {@code DoubleConfigurationItem#sanitize}, which the Gson
+     * read path already applies through the single-argument constructor.
+     *
+     * @return the same instance, repaired; {@code null} in, {@code null} out
+     */
+    public static @Nullable PlayerConfig heal(
+            @Nullable PlayerConfig config) {
+        return heal(config, 0);
+    }
+
+    private static @Nullable PlayerConfig heal(
+            @Nullable PlayerConfig config, int depth) {
+        if (config == null) {
+            return null;
+        }
+
+        // Identity fields are only read for log context, and are resolved defensively: healing must never be
+        // the thing that throws. In practice ConfigurationSourceSerializer#initializeNullConfigFields has
+        // already backfilled any null ConfigurationItem field by the time we get here (verified by test), but
+        // heal() is also callable on hand-built instances, where that guarantee does not hold.
+        String owner = describeOwner(config);
+
+        if (config.exclusionItems == null) {
+            config.exclusionItems = ExclusionItemConfiguration.defaults();
+            config.setHasChangedFromSerializedContent();
+        } else {
+            int pruned = config.exclusionItems.prune();
+            if (pruned > 0) {
+                ArmorHider.LOGGER.info("Repaired {} corrupt or stale exclusion-item entries in the config for {}.",
+                        pruned, owner);
+                config.setHasChangedFromSerializedContent();
+            }
+        }
+
+        // Capture the override in a local before recursing. If the structure is self-referential
+        // (override == config, only reachable via programmatic construction, not JSON), the recursive call
+        // hits the depth limit and sets config.globalPlayerOverride = null on the shared instance - which
+        // would null this very field. Reading the captured local instead of config.globalPlayerOverride keeps
+        // the follow-up dereference safe, honouring the rule that healing must never itself throw.
+        PlayerConfig override = config.globalPlayerOverride;
+        if (override != null) {
+            if (depth >= MAX_GLOBAL_OVERRIDE_DEPTH) {
+                ArmorHider.LOGGER.warn(
+                        "Dropping a global player override nested {} levels deep in the config for {} - "
+                                + "only one level is meaningful and deeper nesting corrupts serialization.",
+                        depth + 1, owner);
+                config.globalPlayerOverride = null;
+                config.setHasChangedFromSerializedContent();
+            } else {
+                heal(override, depth + 1);
+                if (override.hasChangedFromSerializedContent()) {
+                    config.setHasChangedFromSerializedContent();
+                }
+            }
+        }
+
+        return config;
+    }
+
+    /** Log-context helper for {@link #heal}; never throws, whatever state the config is in. */
+    private static String describeOwner(PlayerConfig config) {
+        try {
+            return config.playerName != null && config.playerName.getValue() != null
+                    ? config.playerName.getValue()
+                    : "<unknown>";
+        } catch (Exception e) {
+            return "<unknown>";
+        }
     }
 
     @Contract("-> new")
@@ -415,6 +569,7 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
         fresh.bootsGlint.setValue(old.bootsGlint.getValue());
         fresh.enableCombatDetection.setValue(old.enableCombatDetection.getValue());
         fresh.inCombatUseDefaultModel.setValue(old.inCombatUseDefaultModel.getValue());
+        fresh.hiddenModelBehaviour.setValue(old.hiddenModelBehaviour.getValue());
         fresh.opacityAffectingElytra.setValue(old.opacityAffectingElytra.getValue());
         fresh.opacityAffectingHatOrSkull.setValue(old.opacityAffectingHatOrSkull.getValue());
         fresh.affectAccessories.setValue(old.affectAccessories.getValue());
@@ -445,10 +600,20 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
             // made the mod appear inert until the config file was deleted. Seed a concrete default override so
             // resolution is stable and the settings screen edits a persisted instance (same shape as
             // ArmorHiderPlayerConfigApi#ensureGlobalOverride). Configs that never enabled a global mode keep
-            // the lazy null override — nothing reads it, so there's no reason to write one.
+            // the lazy null override - nothing reads it, so there's no reason to write one.
             fresh.globalPlayerOverride = PlayerConfig.defaults(
                     ArmorHiderPlayerConfigApi.DEFAULT_PLAYER_ID, ArmorHiderPlayerConfigApi.DEFAULT_PLAYER_NAME);
         }
+
+        fresh.elytraOpacity.setValue(ElytraOpacity.fromLegacyConfig(old).getValue());
+        fresh.elytraInFlight.setValue(old.elytraInFlight.getValue());
+        fresh.elytraGlint.setValue(old.opacityAffectingElytra.getValue() ? old.chestGlint.getValue() : true);
+        fresh.settingsScreenLocation.migrate(old);
+
+        fresh.irisDitheringPhases.setValue(old.irisDitheringPhases.getValue());
+        fresh.irisDitheringScale.setValue(old.irisDitheringScale.getValue());
+        fresh.irisDitheringResCap.setValue(old.irisDitheringResCap.getValue());
+        fresh.irisPartialTransparencyMode.setValue(old.irisPartialTransparencyMode.getValue());
 
         fresh.setHasChangedFromSerializedContent();
         return fresh;
@@ -489,9 +654,22 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
      * state: {@link #individualConfigurations}, the {@link #useGlobalOverrideForAllPlayers} flag and the
      * {@link #globalPlayerOverride}. Those are a purely client-side concern and must never be broadcast to
      * the server or other players. ({@link #deepCopy} copies none of them, so this delegates straight to it.)
+     * <p>
+     * {@link #exclusionItems} is also dropped: which items the mod skips is a purely client-side render
+     * decision that nothing server-side reads, while the map is the one unbounded part of the config. Left
+     * in, a large map pushes the gzipped payload past the vanilla 32767-byte custom-payload limit, and a
+     * vanilla server (Realms included) responds by disconnecting the client on join.
+     * <p>
+     * The map is sent <em>empty</em> rather than seeded with {@link ExclusionItemConfiguration#defaults()}:
+     * every default entry is {@code intercepted} (i.e. {@code shouldIgnore == false}), and
+     * {@link ExclusionItemConfiguration#shouldArmorHiderIgnore} also returns {@code false} for an absent
+     * entry - so the two are behaviourally identical for any reader, and empty is a few dozen entries
+     * smaller on the wire.
      */
     public PlayerConfig forNetwork() {
-        return deepCopy(playerName.getValue(), playerId.getValue());
+        var networkConfig = deepCopy(playerName.getValue(), playerId.getValue());
+        networkConfig.exclusionItems = new ExclusionItemConfiguration();
+        return networkConfig;
     }
 
     public PlayerConfig deepCopy(String playerName, UUID playerId) {
@@ -504,8 +682,12 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
         newConfig.bootsOpacity.setValue(this.bootsOpacity.getValue());
         newConfig.enableCombatDetection.setValue(this.enableCombatDetection.getValue());
         newConfig.inCombatUseDefaultModel.setValue(this.inCombatUseDefaultModel.getValue());
+        newConfig.hiddenModelBehaviour.setValue(this.hiddenModelBehaviour.getValue());
         newConfig.opacityAffectingHatOrSkull.setValue(this.opacityAffectingHatOrSkull.getValue());
         newConfig.opacityAffectingElytra.setValue(this.opacityAffectingElytra.getValue());
+        newConfig.elytraOpacity.setValue(this.elytraOpacity.getValue());
+        newConfig.elytraInFlight.setValue(this.elytraInFlight.getValue());
+        newConfig.elytraGlint.setValue(this.elytraGlint.getValue());
         newConfig.affectAccessories.setValue(this.affectAccessories.getValue());
         newConfig.affectHeadAccessory.setValue(this.affectHeadAccessory.getValue());
         newConfig.affectChestAccessory.setValue(this.affectChestAccessory.getValue());
@@ -521,6 +703,11 @@ public class PlayerConfig implements ConfigurationSource<PlayerConfig> {
         newConfig.legsGlint.setValue(this.legsGlint.getValue());
         newConfig.bootsGlint.setValue(this.bootsGlint.getValue());
         newConfig.exclusionItems = this.getExclusionItems().deepCopy();
+        newConfig.settingsScreenLocation.setValue(settingsScreenLocation.getValue());
+        newConfig.irisDitheringPhases.setValue(this.irisDitheringPhases.getValue());
+        newConfig.irisDitheringScale.setValue(this.irisDitheringScale.getValue());
+        newConfig.irisDitheringResCap.setValue(this.irisDitheringResCap.getValue());
+        newConfig.irisPartialTransparencyMode.setValue(this.irisPartialTransparencyMode.getValue());
         return newConfig;
     }
 }

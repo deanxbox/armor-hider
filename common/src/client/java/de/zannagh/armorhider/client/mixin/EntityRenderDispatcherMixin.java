@@ -17,10 +17,10 @@ import net.minecraft.client.renderer.entity.state.EntityRenderState;
 //?}
 
 //? if >= 26.1-0.snapshot.11
-//import net.minecraft.client.renderer.state.CameraRenderState;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 
 //? if >= 1.21.9 && < 26.1-0.snapshot.11
-import net.minecraft.client.renderer.state.CameraRenderState;
+//import net.minecraft.client.renderer.state.level.CameraRenderState;
 
 //? if < 1.21.9 {
 /*import net.minecraft.client.renderer.MultiBufferSource;

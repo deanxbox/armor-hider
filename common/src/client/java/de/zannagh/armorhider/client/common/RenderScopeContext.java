@@ -17,7 +17,7 @@ import org.jspecify.annotations.Nullable;
  * {@link AhRenderManagementApi#getActiveScope(RenderScope)}.
  *
  * @param scope                the scope this context belongs to.
- * @param carrier              identity carrier (entity render state, player, …) — may be
+ * @param carrier              identity carrier (entity render state, player, …) - may be
  *                             {@code null} for compat paths that hand-build a modification.
  * @param modification         the resolved modification for the scope's slot; empty when no
  *                             modification applies.
@@ -35,7 +35,7 @@ public record RenderScopeContext(
 ) {
     /**
      * Whether the underlying mixin should cancel its render call. {@code true} only when the
-     * resolved modification has {@link SlotModification#shouldHide()} set — i.e. the player has
+     * resolved modification has {@link SlotModification#shouldHide()} set - i.e. the player has
      * asked for this slot to be fully hidden.
      */
     public boolean shouldCancel() {
@@ -52,6 +52,17 @@ public record RenderScopeContext(
     }
 
     /**
+     * Whether the piece is genuinely being made translucent (opacity below ~100%), as opposed to
+     * {@link #needsModification()} which is also true when only the glint is toggled off at full
+     * opacity. Render-type swaps onto the depth-write-disabled translucent pipeline must gate on this,
+     * so a solid piece with its glint merely off stays solid (and does not read as see-through under
+     * shaders). See {@link SlotModification#needsTranslucency()}.
+     */
+    public boolean needsTranslucency() {
+        return modification.needsTranslucency();
+    }
+
+    /**
      * Whether the resolved modification is empty (no config applies to this slot for this player).
      * When {@code true}, rendering can be delegated to the vanilla renderer without any changes.
      */
@@ -60,7 +71,7 @@ public record RenderScopeContext(
     }
 
     /**
-     * Returns an empty / pass-through context for a scope — used as the fallback return value
+     * Returns an empty / pass-through context for a scope - used as the fallback return value
      * when no scope is currently active. All query methods on it return safe defaults
      * ({@link #isEmpty()} {@code true}, {@link #shouldCancel()} {@code false}).
      */

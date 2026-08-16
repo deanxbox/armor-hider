@@ -9,6 +9,7 @@ import de.zannagh.armorhider.api.compat.CompatManager;
 import de.zannagh.armorhider.client.ArmorHiderClient;
 import de.zannagh.armorhider.client.api.AhCombatApi;
 import de.zannagh.armorhider.client.common.IdentityCarrier;
+import de.zannagh.armorhider.client.render.EmfHiddenModeContext;
 import de.zannagh.armorhider.log.DebugLogger;
 import de.zannagh.armorhider.net.packets.PlayerConfig;
 import de.zannagh.armorhider.util.PlayerNameUtil;
@@ -43,6 +44,17 @@ public class EmfCompat implements CompatInitializer {
         try {
             EMFAnimationApi.registerVanillaModelCondition(emfEntity -> {
                 var playerName = PlayerNameUtil.getPlayerName(emfEntity);
+
+                // #217 opt-in toggle: when the body (chest) region is hidden, honour the player's
+                // "hidden model behaviour" setting. VANILLA forces the whole vanilla model here;
+                // VANILLA_SEAMS lets EMF render and is handled per-part in EmfModelPartMixin (which
+                // reads the mode we publish below); KEEP (default) leaves the custom model alone.
+                de.zannagh.armorhider.configuration.EmfHiddenModelMode hiddenMode = hiddenModeFor(emfEntity);
+                EmfHiddenModeContext.set(hiddenMode);
+                if (hiddenMode == de.zannagh.armorhider.configuration.EmfHiddenModelMode.VANILLA) {
+                    return true;
+                }
+
                 boolean inCombat = ArmorHiderApi.getInstance().getCombatManagement().isInCombat(playerName);
 
                 if (!inCombat || !AhCombatApi.shouldApplyCombatDetectionFor(playerName)) {
@@ -67,6 +79,40 @@ public class EmfCompat implements CompatInitializer {
     }
 
     /**
+     * The {@link de.zannagh.armorhider.configuration.EmfHiddenModelMode} that applies to the given
+     * entity right now: the player's configured mode when the body (chest) region is hidden, else
+     * {@link de.zannagh.armorhider.configuration.EmfHiddenModelMode#KEEP} (do nothing). Non-players and
+     * players with a visible chest always resolve to {@code KEEP}.
+     *
+     * @param entity the entity EMF is about to render
+     * @return the mode to apply
+     */
+    public static de.zannagh.armorhider.configuration.EmfHiddenModelMode hiddenModeFor(Object entity) {
+        if (!bodyRegionHidden(entity) || !(entity instanceof IdentityCarrier carrier)) {
+            return de.zannagh.armorhider.configuration.EmfHiddenModelMode.KEEP;
+        }
+        PlayerConfig config = ArmorHiderClient.CLIENT_CONFIG_MANAGER.resolveConfig(carrier.armorHider$playerName());
+        return config.hiddenModelBehaviour.getValue();
+    }
+
+    /**
+     * Whether the body (chest) region is currently hidden for the given entity, in which case EMF
+     * should render the vanilla model to avoid exposing a custom player model's arm/torso seam
+     * (#217). Resolved from the entity's live {@link de.zannagh.armorhider.client.common.PlayerModificationInfo}
+     * (config + equipped items), so an empty chest slot or visible armor returns {@code false}.
+     *
+     * @param entity the entity EMF is about to render; only {@link IdentityCarrier} players qualify
+     * @return {@code true} if the chest region resolves to hidden for this player
+     */
+    public static boolean bodyRegionHidden(Object entity) {
+        if (!(entity instanceof IdentityCarrier carrier)) {
+            return false;
+        }
+        var modifications = carrier.armorHider$getPlayerModifications();
+        return modifications != null && modifications.chest().shouldHide();
+    }
+
+    /**
      * When EMF is loaded, skip clearing equipment from the render state.
      * Fresh Animations reads equipment state to determine arm/body poses;
      * clearing it causes arms to separate from the torso (#217).
@@ -75,7 +121,10 @@ public class EmfCompat implements CompatInitializer {
      * @param renderState The renderState that is internally checked to be a {@link AvatarRenderState}
      */
     public static void clearEquipment(Object identityCarrier, Object renderState) {
-        if (!CompatManager.requiresCompatTo(CompatFlags.ENTITY_MODEL_FEATURES)) {
+        // Skip clearing ONLY when EMF is present (Fresh Animations reads equipment off the render
+        // state for arm/body poses - clearing it separates the arms, #217). For everyone else the
+        // clear is the generic hide for modded/custom armor layers that read render-state equipment.
+        if (CompatManager.requiresCompatTo(CompatFlags.ENTITY_MODEL_FEATURES)) {
             return;
         }
         if (!(identityCarrier instanceof IdentityCarrier carrier)) {

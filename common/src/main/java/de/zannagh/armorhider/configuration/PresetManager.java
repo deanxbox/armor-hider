@@ -5,7 +5,6 @@ import de.zannagh.armorhider.net.packets.PlayerConfig;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
@@ -19,6 +18,8 @@ public class PresetManager {
     private final Path file;
     private final ConfigPreset @Nullable [] presets = new ConfigPreset[PRESET_COUNT];
     private int activeIndex = -1;
+    /** Set by {@link #updateActivePreset}; cleared by {@link #save()}. See {@link #flushPendingSave()}. */
+    private boolean pendingSave;
 
     public PresetManager() {
         this(DEFAULT_FILE);
@@ -62,9 +63,26 @@ public class PresetManager {
         savePreset(index, ConfigPreset.fromPlayerConfig(config));
     }
 
+    /**
+     * Syncs the live config into the active preset <em>in memory only</em>, marking it for a later write.
+     * <p>
+     * This is called from every settings mutation, including slider movement. Writing here is what made a
+     * single slider drag issue a synchronous, pretty-printed serialization of all five presets per frame on
+     * the render thread. Callers flush via {@link #flushPendingSave()} when the settings screen closes.
+     */
     public void updateActivePreset(PlayerConfig config) {
-        if (activeIndex >= 0 && activeIndex < PRESET_COUNT && presets[activeIndex] != null) {
+        // Deliberately does NOT require presets[activeIndex] to be non-null: the preset is rebuilt wholesale
+        // from the live config, so a missing entry is something to materialise, not a reason to skip. Bailing
+        // out there would silently drop every settings change for as long as that slot stayed active.
+        if (activeIndex >= 0 && activeIndex < PRESET_COUNT) {
             presets[activeIndex] = ConfigPreset.fromPlayerConfig(config);
+            pendingSave = true;
+        }
+    }
+
+    /** Writes presets to disk if {@link #updateActivePreset} left changes pending. */
+    public void flushPendingSave() {
+        if (pendingSave) {
             save();
         }
     }
@@ -122,7 +140,10 @@ public class PresetManager {
                 storage.activeIndex = activeIndex;
                 ArmorHider.GSON.toJson(storage, w);
             }
-        } catch (IOException e) {
+            // Cleared only after the write actually succeeds: clearing up front would make a failed save
+            // silently discard the pending edits, since flushPendingSave() would never retry them.
+            pendingSave = false;
+        } catch (Exception e) {
             ArmorHider.LOGGER.error("Failed to save presets!", e);
         }
     }

@@ -14,38 +14,112 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# Opt in to publishing Gradle build scans (gated on this var in settings.gradle.kts); the
+# setup-gradle action then surfaces the scan link in the job summary.
+env:
+  ARMOR_HIDER_BUILD_SCAN_PUBLISH: "true"
+
 jobs:
-  check-runner:
-    name: Check Runner
-    uses: ./.github/workflows/check-runner.yml
-    secrets: inherit
+  runner-and-version:
+    name: Determine Runner & Get Version
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+      fullSemVer: ${{ steps.version.outputs.fullSemVer }}
+    steps:
+      - name: Pick a runner
+        id: pick
+        uses: zannagh/versionizer/determine-runner@v1
+        with:
+          # Fine-grained PAT with Administration:read on this repo (lists runners). Missing/invalid
+          # token degrades gracefully to default-runs-on.
+          runner-token: ${{ secrets.RUNNER_TOKEN }}
+          required-labels: 'Linux,X64,build'
+          default-runs-on: 'ubuntu-latest'
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Calculate Version
+        id: version
+        uses: zannagh/versionizer/calculate-version@v1
 
   build:
     name: Build & Test
-    needs: check-runner
-    runs-on: ${{ fromJSON(needs.check-runner.outputs.runner || '["ubuntu-latest"]') }}
+    needs: runner-and-version
+    runs-on: ${{ fromJSON(needs.runner-and-version.outputs.runner) }}
+    # `contents: read` to check out; `pull-requests: write` so the coverage step can post/update its
+    # summary comment on the PR.
+    permissions:
+      contents: read
+      pull-requests: write
     defaults:
       run:
         shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
       - name: Setup Gradle Environment
         uses: zannagh/versionizer/setup-gradle-env@v1
 
-      - name: Calculate Version
-        id: version
-        uses: zannagh/versionizer/calculate-version@v1
+      # `stageArtifacts` below compiles everything but runs NO tests, so without this step the job
+      # only ever checked that the project builds. Runs first, to fail fast.
+      #
+      # `aggregatedCoverage` runs the Tier-1 unit tests (`:paper:test` + the active `:common:<variant>:test`,
+      # which it depends on) and merges them into one report. It resolves the active stonecutter variant
+      # itself (via `stonecutter.current`), so no shell-side variant grep is needed. The Tier-3
+      # client/server-spawning suite lives in its own `smokeTest` task and is never reachable from here.
+      # See CONTRIBUTING.md > Testing.
+      - name: Unit tests + coverage
+        run: ./gradlew aggregatedCoverage
 
-      - name: Build & Stage Artifacts
-        run: ./gradlew stageArtifacts -PsemVer="${{ steps.version.outputs.fullSemVer }}" -Pprerelease="true"
+      # The merged Tier-1 report (build/reports/jacoco/aggregate) drives one clean coverage % on the PR.
+      - name: Coverage summary (PR comment)
+        uses: madrapps/jacoco-report@v1.7.2
+        with:
+          paths: ${{ github.workspace }}/build/reports/jacoco/aggregate/jacocoAggregate.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: Coverage report
+          update-comment: true
 
-      - name: Upload Build Artifacts
+      - name: Upload coverage report
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: armor-hider-${{ steps.version.outputs.fullSemVer }}
+          name: coverage-${{ needs.runner-and-version.outputs.fullSemVer }}
+          # Merged report + both per-module reports.
+          path: '**/build/reports/jacoco/**'
+          if-no-files-found: warn
+
+      # Upload the merged JaCoCo XML to Codecov for the historical trend (project % delta vs main) +
+      # patch coverage. The base to diff against comes from coverage.yml uploading on push-to-main.
+      # `fail_ci_if_error: false` keeps a Codecov/token hiccup (or a fork PR without the secret) from
+      # reddening the build. madrapps (above) still provides the changed-lines gate.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: build/reports/jacoco/aggregate/jacocoAggregate.xml
+          disable_search: true
+          fail_ci_if_error: false
+
+      # Codecov Test Analytics: test run times + flaky/failed-test detection. Gradle already writes the
+      # JUnit XML the CLI auto-discovers under **/build/test-results/. `!cancelled()` so it still uploads
+      # when a test FAILED - that's exactly the run we want the failed-tests report for.
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Build & Stage Artifacts
+        run: ./gradlew stageArtifacts -PsemVer="${{ needs.runner-and-version.outputs.fullSemVer }}" -Pprerelease="true"
+
+      - name: Upload Staged Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: armor-hider-${{ needs.runner-and-version.outputs.fullSemVer }}
           path: staging/*.jar
           if-no-files-found: warn

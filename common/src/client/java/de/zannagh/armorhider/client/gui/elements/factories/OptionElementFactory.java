@@ -93,9 +93,9 @@ public class OptionElementFactory {
                 onPress -> {
                     var mc = Minecraft.getInstance();
                     //? if <= 26.1.2
-                    var currentScreen = mc.screen;
+                    //var currentScreen = mc.screen;
                     //? if > 26.1.2
-                    //var currentScreen = mc.gui.screen();
+                    var currentScreen = mc.gui.screen();
                     if (currentScreen == null) {
                         return;
                     }
@@ -104,19 +104,9 @@ public class OptionElementFactory {
                 }
         );
 
+        // The accessory + hidden-model (EMF) compat toggles live in their own "Compatibilities" row
+        // (see ArmorHiderOptionsPanelWidget), not here, so this row stays behaviour-only.
         var globalButtons = new java.util.ArrayList<AbstractWidget>(java.util.List.of(first, second, third));
-        // Accessory-hide master toggle: present only when an accessory provider is loaded (configs has
-        // a 4th entry). Inserted before the "individual settings" button so that stays right-most.
-        if (configs.size() > 3) {
-            globalButtons.add(new AffectAccessoriesButton(
-                    configs.get(3).getFirst(),
-                    onPress -> {
-                        if (onPress instanceof AffectAccessoriesButton btn) {
-                            configs.get(3).getSecond().accept(btn.toggle());
-                        }
-                    }
-            ));
-        }
         globalButtons.add(fourth);
 
         int globalButtonCount = globalButtons.size();
@@ -162,7 +152,7 @@ public class OptionElementFactory {
 
     /**
      * Builds a left-aligned row of just the three general behaviour toggles (combat detection, vanilla armor
-     * in combat, respect invisibility) — no presets and no "individual settings" button. Used by the
+     * in combat, respect invisibility) - no presets and no "individual settings" button. Used by the
      * per-player override panel, where presets are not applicable but the behaviour toggles still are.
      */
     public AbstractWidget createGeneralTogglesRow(ArrayList<Pair<Boolean, Consumer<Boolean>>> configs) {
@@ -191,25 +181,42 @@ public class OptionElementFactory {
                 }
         );
 
+        // The accessory + hidden-model compat toggles moved to the dedicated "Compatibilities" row.
         var buttons = new java.util.ArrayList<AbstractWidget>(java.util.List.of(first, second, third));
-        // Optional 4th toggle: accessory-hide master, present only when the panel supplied it (i.e. an
-        // accessory provider — Curios / Trinkets / Artifacts — is loaded).
-        if (configs.size() > 3) {
-            buttons.add(new AffectAccessoriesButton(
-                    configs.get(3).getFirst(),
-                    onPress -> {
-                        if (onPress instanceof AffectAccessoriesButton btn) {
-                            configs.get(3).getSecond().accept(btn.toggle());
-                        }
-                    }
-            ));
-        }
 
         int sq = UiConstants.SQUARE_BUTTON_WIDTH;
         var spacing = new ElementSpacingOptions(rowWidth)
                 .forEvenElements(sq, buttons.size())
                 .withLeftAlignment();
         return new CompoundButtonWidget(buttons.toArray(new AbstractWidget[0]), rowWidth, 20, spacing);
+    }
+
+    /**
+     * A "Compatibilities" row: a left-aligned label filling the left, with the given compat toggle
+     * buttons as fixed square icons right-bound on the right (same width as the other toggles).
+     * Returns {@code null} when there are no compat buttons to show, so the caller can omit the row.
+     *
+     * @param compatButtons the square compat toggle buttons (0-2); empty means no row
+     * @return the row widget, or {@code null} if there is nothing to show
+     */
+    public @Nullable AbstractWidget createCompatibilitiesRow(java.util.List<AbstractWidget> compatButtons) {
+        if (compatButtons.isEmpty()) {
+            return null;
+        }
+        // Left-aligned label (MultiLineTextWidget defaults to left-aligned) nudged to vertically centre
+        // in the row; CompoundOptionWidget sets its X/width and top Y, so we offset Y on top of that.
+        int rowHeight = UiConstants.DEFAULT_BUTTON_HEIGHT;
+        var label = new MultiLineTextWidget(
+                Component.translatable("armorhider.options.compatibilities"),
+                Minecraft.getInstance().font) {
+            @Override
+            public void setY(int y) {
+                super.setY(y + Math.max(0, (rowHeight - Minecraft.getInstance().font.lineHeight) / 2));
+            }
+        };
+        AbstractWidget secondary = compatButtons.get(0);
+        AbstractWidget tertiary = compatButtons.size() > 1 ? compatButtons.get(1) : null;
+        return new CompoundOptionWidget(label, secondary, tertiary, null, rowWidth, 20);
     }
 
     public void addSliderWithToggles(EquipmentSlot slot,
@@ -301,9 +308,9 @@ public class OptionElementFactory {
                 var mc = Minecraft.getInstance();
 
                 //? if <= 26.1.2
-                var currentScreen = mc.screen;
+                //var currentScreen = mc.screen;
                 //? if > 26.1.2
-                //var currentScreen = mc.gui.screen();
+                var currentScreen = mc.gui.screen();
                 if (currentScreen == null) {
                     return;
                 }
@@ -348,6 +355,39 @@ public class OptionElementFactory {
         return new CompoundOptionWidget(sliderWidget, button, tertiary, affectOtherItemsButton, accessoryButton, rowWidth, 20);
     }
 
+    /**
+     * Builds the elytra row: an opacity slider (left) plus a glint toggle and an "in flight" toggle
+     * (right). The elytra is not a vanilla {@link EquipmentSlot}, so it uses its own dedicated toggle
+     * buttons instead of the slot-keyed ones and carries no item-exclusion button.
+     */
+    public AbstractWidget createElytraSliderRow(OptionInstance<Double> slider,
+                                                Options options,
+                                                boolean initialGlint,
+                                                Consumer<Boolean> glintConsumer,
+                                                boolean initialInFlight,
+                                                Consumer<Boolean> inFlightConsumer) {
+        int smallCount = 2; // glint + in-flight
+        int sliderWidth = CompoundOptionWidget.getPrimaryWidth(rowWidth, smallCount);
+        int buttonWidth = CompoundOptionWidget.getAdditionalElementWidth(rowWidth, smallCount);
+
+        AbstractWidget sliderWidget = slider.createButton(options, 0, 0, sliderWidth);
+
+        var glintButton = new ElytraGlintButton(initialGlint, buttonWidth, UiConstants.DEFAULT_BUTTON_HEIGHT,
+                onPress -> {
+                    if (onPress instanceof ElytraGlintButton btn) {
+                        glintConsumer.accept(btn.toggle());
+                    }
+                });
+        var inFlightButton = new ElytraInFlightButton(initialInFlight, buttonWidth, UiConstants.DEFAULT_BUTTON_HEIGHT,
+                onPress -> {
+                    if (onPress instanceof ElytraInFlightButton btn) {
+                        inFlightConsumer.accept(btn.toggle());
+                    }
+                });
+
+        return new CompoundOptionWidget(sliderWidget, glintButton, inFlightButton, null, rowWidth, 20);
+    }
+
     public OptionInstance<Double> buildDoubleOption(String key,
                                                     MutableComponent tooltip,
                                                     @Nullable MutableComponent narration,
@@ -358,8 +398,11 @@ public class OptionElementFactory {
                 key,
                 new NarratedTooltipFactory<>(tooltip, narration),
                 (text, value) -> sliderTextProvider.apply(value),
+                // The trailing flag is applyValueImmediately. It MUST stay false: with it on, the setter
+                // fires on every drag step, and each call writes the whole preset file to disk
+                // synchronously on the render thread - enough to starve frames and input on a slider drag.
                 //? if >= 1.21.11
-                new OptionInstance.IntRange(0, 20).xmap(v -> v / 20.0, v -> (int) Math.round(v * 20), true)
+                new OptionInstance.IntRange(0, 20).xmap(v -> v / 20.0, v -> (int) Math.round(v * 20), false)
                 //? if >= 1.20.5 && < 1.21.11
                 //new OptionInstance.IntRange(0, 20).xmap(v -> v / 20.0, v -> (int) Math.round(v * 20))
                 //? if < 1.20.5
@@ -367,9 +410,9 @@ public class OptionElementFactory {
                 ,
                 defaultValue,
                 //? if > 26.1.2
-                //setter::accept
+                setter::accept
                 //? if <= 26.1.2
-                setter
+                //setter
         );
     }
 
@@ -390,9 +433,9 @@ public class OptionElementFactory {
                 (text, value) -> value ? Component.translatable("armorhider.options.toggle.on") : Component.translatable("armorhider.options.toggle.off"),
                 defaultValue,
                 //? if > 26.1.2
-                //setter::accept
+                setter::accept
                 //? if <= 26.1.2
-                setter
+                //setter
         );
     }
 }

@@ -82,7 +82,7 @@ public enum CompatFlags {
      *
      * @since 0.10.3
      */
-    GECKO_LIB(1<<10, "software.bernie.geckolib.renderer.GeoArmorRenderer"),
+    GECKO_LIB(1<<10, "com.geckolib.renderer.GeoArmorRenderer"),
 
     /**
      * Curios API for additional slots.
@@ -117,7 +117,34 @@ public enum CompatFlags {
      *
      * @since 0.10.10
      */
-    SYNTRA(1<<15, "cpw.mods.modlauncher.Launcher");
+    SYNTRA(1<<15, "cpw.mods.modlauncher.Launcher"),
+
+    /**
+     * First Person Model (tr7zw), which renders the local player's body in first person and cancels
+     * several layer submits for the camera entity.
+     *
+     * @since 0.12.5
+     */
+    FIRST_PERSON_MODEL(1<<16, "dev.tr7zw.firstperson.FirstPersonModelCore"),
+
+    /**
+     * Immersive Armors (Conczin), which cancels the vanilla equipment layer and draws its own armor
+     * items as a list of {@code Piece}s.
+     *
+     * @since 0.12.5
+     */
+    IMMERSIVE_ARMORS(1<<17, "immersive_armors.client.render.entity.piece.Piece"),
+
+    /**
+     * Armored Elytra (dorkix, Modrinth {@code elytra-armor}), which forges a chestplate + elytra into a
+     * single worn {@code Items.ELYTRA} (chestplate stored in CUSTOM_DATA) and swaps the chestplate back
+     * in at {@code HumanoidArmorLayer.renderArmorPiece}. Our FGM breast-armor substitution keys off that
+     * CUSTOM_DATA, so it must only fire when this mod is actually present - otherwise the item is just a
+     * plain elytra and nothing draws the body chestplate.
+     *
+     * @since 0.12.9
+     */
+    ARMORED_ELYTRA(1<<18, "dorkix.armored.elytra.ArmoredElytra");
 
     private final long compatFlagValue;
 

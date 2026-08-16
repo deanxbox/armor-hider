@@ -6,7 +6,6 @@ import de.zannagh.armorhider.client.api.AhRenderManagementApi;
 import de.zannagh.armorhider.client.common.IdentityCarrier;
 import de.zannagh.armorhider.client.common.RenderInterceptionResult;
 import de.zannagh.armorhider.client.common.RenderScope;
-import de.zannagh.armorhider.util.ItemsUtil;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import org.jspecify.annotations.Nullable;
@@ -38,18 +37,20 @@ public class ArmorHiderElytraRenderer extends AbstractArmorHiderRenderer {
             setEmptyModification();
             return RenderInterceptionResult.ignore();
         }
-        ItemStack elytraStack = stack != null ? stack : ItemsUtil.elytraItemStack();
-        var mod = resolveModification(carrier, EquipmentSlot.CHEST, elytraStack);
+        var elytraInfo = stack != null ? new de.zannagh.armorhider.common.ItemInfo(stack) : de.zannagh.armorhider.common.ItemInfo.elytraItemInfo();
+        var mod = resolveModification(carrier, elytraInfo);
 
         // Pass-through branches: do NOT enter scope. enterScope-with-mod would still register a
         // non-empty modification into the active-scope map, and downstream wraps then react to it
-        // even though we logically "ignored" — that leaks into things like ElytraTrims rendering.
+        // even though we logically "ignored" - that leaks into things like ElytraTrims rendering.
         if (mod.isEmpty()) {
             return RenderInterceptionResult.ignore();
         }
         // Flying must short-circuit BEFORE shouldHide so that 0%-opacity players still see the
-        // elytra geometry while actually elytra-flying — the wings are the flight indicator.
-        if (carrier.ah$isPlayerFlying()) {
+        // elytra geometry while actually elytra-flying — the wings are the flight indicator. Read the
+        // config off the modification we just resolved (same instance) rather than resolving it again;
+        // honour the "show elytra in flight" opt-out that main added.
+        if (carrier.ah$isPlayerFlying() && mod.config().elytraInFlight.getValue()) {
             return RenderInterceptionResult.ignore();
         }
         //? if < 1.21.9 {
@@ -66,11 +67,11 @@ public class ArmorHiderElytraRenderer extends AbstractArmorHiderRenderer {
         // outright (ET's renderLayers then never runs, so there is nothing to fade).
 
         if (mod.shouldHide()) {
-            // Cancel only — do NOT enter the scope. The WingsLayer render is cancelled at HEAD, so
+            // Cancel only - do NOT enter the scope. The WingsLayer render is cancelled at HEAD, so
             // its RETURN (which exits the scope) never fires; entering here leaks a hide-scope
             // (alpha 0) for the rest of the entity render. On NeoForge that leaked ELYTRA scope is
             // read by NeoForgeArmorColorMixin (which wraps the shared SubmitNodeCollection) and
-            // applied to every later model submit — turning the skull, offhand, etc. invisible.
+            // applied to every later model submit - turning the skull, offhand, etc. invisible.
             cancel(ci);
             return new RenderInterceptionResult(true, true, getTargetScope(), carrier, mod);
         }

@@ -7,6 +7,7 @@ import de.zannagh.armorhider.client.common.*;
 import de.zannagh.armorhider.client.render.RenderModifications;
 import de.zannagh.armorhider.client.render.rendertype.ArmorHiderRenderTypes;
 import de.zannagh.armorhider.client.suppressions.ConditionalSuppressor;
+import de.zannagh.armorhider.common.ItemInfo;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -95,6 +96,13 @@ public abstract class AbstractArmorHiderRenderer implements AhRenderer {
         return mod;
     }
 
+    protected SlotModification resolveModification(@NonNull IdentityCarrier carrier, @Nullable ItemInfo info) {
+        if (info == null) {
+            return resolveModification(carrier, null, null);
+        }
+        return resolveModification(carrier, info.getEquippableSlot(), info.getStack());
+    }
+
     /**
      * Build a {@link SlotModification} for the given carrier/slot/stack and update the per-thread
      * modification API so {@link #getRenderModificationApi()} reflects the latest interception.
@@ -122,7 +130,7 @@ public abstract class AbstractArmorHiderRenderer implements AhRenderer {
      * Default interception: empty modification → ignore; shouldHide → cancel CI and signal cancel;
      * otherwise → enter scope without cancelling.
      * <p>
-     * Callers must null-check {@code carrier} before invoking — {@link #resolveModification}
+     * Callers must null-check {@code carrier} before invoking - {@link #resolveModification}
      * dereferences the carrier on the first line. Every built-in renderer guards explicitly
      * (typically with {@code if (carrier == null) { setEmptyModification(); return ignore(); }})
      * before reaching this method.

@@ -1,11 +1,14 @@
 package de.zannagh.armorhider.client.gui.elements;
 
 import com.mojang.datafixers.util.Pair;
+import de.zannagh.armorhider.api.compat.CompatFlags;
 import de.zannagh.armorhider.api.compat.CompatManager;
 import de.zannagh.armorhider.client.ArmorHiderClient;
 import de.zannagh.armorhider.client.gui.UiConstants;
 import de.zannagh.armorhider.client.gui.elements.factories.OptionElementFactory;
 import de.zannagh.armorhider.client.gui.elements.implementations.AccessoryAffectButton;
+import de.zannagh.armorhider.client.gui.elements.implementations.AffectAccessoriesButton;
+import de.zannagh.armorhider.client.gui.elements.implementations.HiddenModelBehaviourButton;
 import de.zannagh.armorhider.client.gui.elements.implementations.ShowShieldWhenBlockingButton;
 import de.zannagh.armorhider.client.gui.screens.AdvancedArmorHiderSettingsScreen;
 import de.zannagh.armorhider.configuration.PresetManager;
@@ -26,7 +29,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import org.jspecify.annotations.NonNull;
 import org.jetbrains.annotations.Nullable;
 import de.zannagh.armorhider.net.packets.PlayerConfig;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 import java.util.ArrayList;
 import java.util.function.Consumer;
@@ -102,11 +105,6 @@ public class ArmorHiderOptionsPanelWidget extends AbstractWidget {
         configs.add(new Pair<>(config.enableCombatDetection.getValue(), val -> setSetting(val, config.enableCombatDetection::setValue)));
         configs.add(new Pair<>(config.inCombatUseDefaultModel.getValue(), val -> setSetting(val, config.inCombatUseDefaultModel::setValue)));
         configs.add(new Pair<>(config.disableArmorHiderOnInvisibility.getValue(), val -> setSetting(val, config.disableArmorHiderOnInvisibility::setValue)));
-        // Master accessory-hide toggle — only offered (as a 4th general-row button) when an accessory
-        // provider (Curios / Trinkets / Artifacts) is present, so vanilla users don't see a dead toggle.
-        if (CompatManager.anyAccessoryProviderLoaded()) {
-            configs.add(new Pair<>(config.affectAccessories.getValue(), val -> setSetting(val, config.affectAccessories::setValue)));
-        }
 
         if (showPresets) {
             // Local config: general behaviour toggles + presets + the "individual settings" entry, one row.
@@ -151,9 +149,9 @@ public class ArmorHiderOptionsPanelWidget extends AbstractWidget {
                 chestOption,
                 gameOptions,
                 config.chestGlint.getValue(),
-                config.opacityAffectingElytra.getValue(),
+                null,
                 val -> setSetting(val, config.chestGlint::setValue),
-                val -> setSetting(val, config.opacityAffectingElytra::setValue),
+                null,
                 null,
                 accessoryButtonFor(EquipmentSlot.CHEST, config.affectChestAccessory.getValue(), config.affectChestAccessory::setValue)
         );
@@ -198,6 +196,25 @@ public class ArmorHiderOptionsPanelWidget extends AbstractWidget {
                 accessoryButtonFor(EquipmentSlot.FEET, config.affectFeetAccessory.getValue(), config.affectFeetAccessory::setValue)
         );
 
+        // Elytra sits between the boots and the offhand: its own opacity slider (decoupled from the
+        // chestplate since AH 0.12.14) plus a glint toggle and an "in flight" toggle.
+        var elytraOption = factory.buildDoubleOption(
+                "armorhider.elytra.transparency",
+                Component.translatable("armorhider.options.elytra.tooltip"),
+                Component.translatable("armorhider.options.elytra.tooltip_narration"),
+                currentValue -> Component.translatable("armorhider.options.elytra.button_text", String.format("%.0f%%", currentValue * 100)),
+                config.elytraOpacity.getValue(),
+                val -> setSetting(val, config.elytraOpacity::setValue)
+        );
+        factory.addElementAsWidget(factory.createElytraSliderRow(
+                elytraOption,
+                gameOptions,
+                config.elytraGlint.getValue(),
+                val -> setSetting(val, config.elytraGlint::setValue),
+                config.elytraInFlight.getValue(),
+                val -> setSetting(val, config.elytraInFlight::setValue)
+        ));
+
         var offhandOption = factory.buildDoubleOption(
                 "armorhider.offhand.transparency",
                 Component.translatable("armorhider.options.offhand.tooltip"),
@@ -225,6 +242,33 @@ public class ArmorHiderOptionsPanelWidget extends AbstractWidget {
                 null,
                 shieldButton
         );
+
+        // "Compatibilities" row: the accessory-hide master toggle (when an accessory provider is
+        // loaded) and the EMF/Fresh Animations hidden-model toggle (when EMF is present), as a labelled
+        // row of right-bound square icons. Omitted entirely when neither compat applies.
+        var compatButtons = new ArrayList<AbstractWidget>();
+        if (CompatManager.anyAccessoryProviderLoaded()) {
+            compatButtons.add(new AffectAccessoriesButton(
+                    config.affectAccessories.getValue(),
+                    onPress -> {
+                        if (onPress instanceof AffectAccessoriesButton btn) {
+                            setSetting(btn.toggle(), config.affectAccessories::setValue);
+                        }
+                    }));
+        }
+        if (CompatManager.requiresCompatTo(CompatFlags.ENTITY_MODEL_FEATURES)) {
+            compatButtons.add(new HiddenModelBehaviourButton(
+                    config.hiddenModelBehaviour.getValue(),
+                    onPress -> {
+                        if (onPress instanceof HiddenModelBehaviourButton btn) {
+                            setSetting(btn.cycle(), config.hiddenModelBehaviour::setValue);
+                        }
+                    }));
+        }
+        var compatRow = factory.createCompatibilitiesRow(compatButtons);
+        if (compatRow != null) {
+            factory.addElementAsWidget(compatRow);
+        }
 
         if (showPresets) {
             factory.addElementAsWidget(Button.builder(
@@ -315,15 +359,15 @@ public class ArmorHiderOptionsPanelWidget extends AbstractWidget {
 
     @Override
     //? if >= 26.1-1.pre.1 {
-    /*protected void extractWidgetRenderState(@NonNull GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+    protected void extractWidgetRenderState(@NonNull GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
         widgetList.extractRenderState(guiGraphics, mouseX, mouseY, partialTick);
     }
-    *///?}
+    //?}
     //? if >= 1.21 && < 26.1-1.pre.1 {
-    protected void renderWidget(@NonNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+    /*protected void renderWidget(@NonNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         widgetList.render(guiGraphics, mouseX, mouseY, partialTick);
     }
-    //?}
+    *///?}
     //? if < 1.21 {
     /*public void renderWidget(@NonNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         widgetList.render(guiGraphics, mouseX, mouseY, partialTick);

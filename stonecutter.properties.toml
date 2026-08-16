@@ -4,7 +4,7 @@ archives_base_name = "armor-hider"
 loader_version = "0.18.4"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Per MC version — shared between fabric and neoforge for the same game version.
+# Per MC version - shared between fabric and neoforge for the same game version.
 # Matched via a custom "version" tag added in multiloader-common.gradle.kts.
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -56,47 +56,11 @@ display_version = "mc-1.21.11"
 accesswidener.version = "current"
 game_versions = "1.21.11"
 
-["26.1-snapshot-11"]
-java.version = "25"
-display_version = "26.1-snap.7-11"
-accesswidener.version = "current"
-game_versions = "26.1-snapshot-7,26.1-snapshot-8,26.1-snapshot-9,26.1-snapshot-10,26.1-snapshot-11"
-
-["26.1-pre-2"]
-java.version = "25"
-display_version = "mc-26.1-pre.1-2"
-accesswidener.version = "current"
-game_versions = "26.1-pre-1,26.1-pre-2"
-
-["26.1-rc-1"]
-java.version = "25"
-display_version = "mc-26.1-rc.1-2"
-accesswidener.version = "current"
-game_versions = "26.1-rc-1,26.1-rc-2"
-
-["26.1-rc-2"]
-java.version = "25"
-display_version = "mc-26.1-rc.1-2"
-accesswidener.version = "current"
-game_versions = "26.1-rc-1,26.1-rc-2"
-
 ["26.1.2"]
 java.version = "25"
 display_version = "mc-26.1.0-2"
 accesswidener.version = "current"
 game_versions = "26.1,26.1.1,26.1.2"
-
-["26.2-snapshot-3"]
-java.version = "25"
-display_version = "26.2-snap.3"
-accesswidener.version = "current"
-game_versions = "26.2-snapshot-3"
-
-["26.2-pre-1"]
-java.version = "25"
-display_version = "26.2-pre.1"
-accesswidener.version = "current"
-game_versions = "26.2-pre-1"
 
 ["26.2"]
 java.version = "25"
@@ -104,14 +68,14 @@ display_version = "26.2"
 accesswidener.version = "current"
 game_versions = "26.2"
 
-["26.3-snapshot-5"]
+["26.3-snapshot-8"]
 java.version = "25"
-display_version = "26.3-snap.5"
+display_version = "26.3-snap.8"
 accesswidener.version = "current"
-game_versions = "26.3-snapshot-5"
+game_versions = "26.3-snapshot-8"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Per project — loader-specific properties.
+# Per project - loader-specific properties.
 # Matched via the default project tag (e.g. "fabric-1.20.1").
 #
 # IMPORTANT: fabric.* and neoforge.* keys MUST be quoted ("fabric.xxx") to
@@ -129,23 +93,32 @@ iris.version = "s5eFLITc"
 emf.version = "HLnLv1St"
 etf.version = "v0btz5GE"
 waveycapes.version = "aoyyskwv"
+deeperdarker.version = "GeXcCDSS" # 1.20.1 fabric
 modmenu.version = "lEkperf6"
 gender.version = "nYZ0oktX"
+trinkets.version = "AHxQGtuC" # 3.7.2 (1.20.1)
+accessories.version = "A7wwzJ0e" # 1.0.0-beta.48+1.20.1
 fabricapi.version = "hu6gukgT"
+immersivearmors.version = "mGE2GYeN" # 1.7.2+1.20.1 fabric
 
 ["fabric-1.21.1"]
 "fabric.minecraft_version" = "1.21.1"
 "fabric.minecraft_version_range" = ">=1.21 <=1.21.1"
 elytratrims.version = "KOEvdSw7"
-geckolib.version = "11VBhLU2"
-iris.version = "zsoi0dso"
+geckolib.version = "dnJdtm0u" # 4.9.2 (was 11VBhLU2 / 4.5.8)
+deeperdarker.version = "3MnQb3Tb" # 1.21.1 fabric
+iris.version = "bAo1Qhte"
 emf.version = "NLDNY8vg"
 etf.version = "udcdeUXw"
 modmenu.version = "v6Xx3fbU"
 waveycapes.version = "EcKyPvJR"
 gender.version = "kJmjQvAS"
+trinkets.version = "JagCscwi" # 3.10.0 (1.21.1)
+accessories.version = "Xlt4eWBe" # 1.1.0-beta.53+1.21.1
 fabricapi.version = "Lwt6YYHL"
-# fabric-api 0.116.x for 1.21.1 predates fabric-client-gametest-api-v1 — Phase 2 entity
+immersivearmors.version = "4m0lwLNO" # 1.7.6+1.21.1 fabric
+uranus.version = "H6EWSmDu" # 2.4.1 fabric (Ice and Fire: CE custom armor)
+# fabric-api 0.116.x for 1.21.1 predates fabric-client-gametest-api-v1 - Phase 2 entity
 # render smoke can't be wired here. fabricapi.semver intentionally omitted; the variant
 # stays on Phase 1 boot smoke only.
 
@@ -161,7 +134,7 @@ modmenu.version = "v6Xx3fbU"
 waveycapes.version = "EcKyPvJR"
 gender.version = "kJmjQvAS"
 fabricapi.version = "UEjZZNue"
-# fabric-api 0.116.x for 1.21.1 predates fabric-client-gametest-api-v1 — Phase 2 entity
+# fabric-api 0.116.x for 1.21.1 predates fabric-client-gametest-api-v1 - Phase 2 entity
 # render smoke can't be wired here. fabricapi.semver intentionally omitted; the variant
 # stays on Phase 1 boot smoke only.
 
@@ -177,7 +150,7 @@ modmenu.version = "v6Xx3fbU"
 waveycapes.version = "EcKyPvJR"
 gender.version = "kJmjQvAS"
 fabricapi.version = "wLq4rGsB"
-# fabric-api 0.116.x for 1.21.1 predates fabric-client-gametest-api-v1 — Phase 2 entity
+# fabric-api 0.116.x for 1.21.1 predates fabric-client-gametest-api-v1 - Phase 2 entity
 # render smoke can't be wired here. fabricapi.semver intentionally omitted; the variant
 # stays on Phase 1 boot smoke only.
 
@@ -192,6 +165,7 @@ etf.version = "sXFmuZiZ"
 waveycapes.version = "EcKyPvJR"
 modmenu.version = "qEKKsTqd"
 gender.version = "T31mEfNe"
+accessories.version = "wmLc2Y7f" # 1.2.19-beta+1.21.4 (Trinkets has no 1.21.4 build)
 fabricapi.version = "p96k10UR"
 fabricapi.semver = "0.119.4+1.21.4"
 
@@ -205,7 +179,8 @@ emf.version = "rPlvbW7d"
 etf.version = "LhiABkEc"
 waveycapes.version = "TJiebQCb"
 modmenu.version = "ku5NivOP"
-gender.version = "Z3yx6MPE"
+gender.version = "Z3yx6MPE" # 4.3
+accessories.version = "MP4v9WZU" # 1.3.8-beta+1.21.8 (Trinkets has no 1.21.8 build)
 fabricapi.version = "g58ofrov"
 fabricapi.semver = "0.136.1+1.21.8"
 
@@ -219,7 +194,8 @@ emf.version = "q5SsVEBz"
 etf.version = "yW674mc9"
 waveycapes.version = "XbBsWRV9"
 modmenu.version = "pYbFlVtR"
-gender.version = "wV4whY0G"
+gender.version = "wV4whY0G" # 5.0.0-Beta.2
+firstperson.version = "8kR5GIsh" # 2.7.2
 fabricapi.version = "tV4Gc0Zo"
 fabricapi.semver = "0.138.4+1.21.10"
 
@@ -231,63 +207,14 @@ geckolib.version = "G1BvHQDL"
 iris.version = "fDpuVzVr"
 emf.version = "CWZPvNbk"
 etf.version = "rAQimlSn"
+fa.version = "xN57JJts" # Fresh Animations 1.10.4 (resource pack, issue #217 repro)
+faplayer.version = "Wj7NeGjP" # FA Player Extension 1.1 (issue #217 repro)
 waveycapes.version = "lGSZdVwH"
 modmenu.version = "Tyk71iSw"
-gender.version = "W7WJBV1r"
+gender.version = "W7WJBV1r" # 5.0.0-Beta.3
+firstperson.version = "EqDE0uC5" # 2.7.2
 fabricapi.version = "5zJNhXV2"
 fabricapi.semver = "0.141.4+1.21.11"
-
-["fabric-26.1-snapshot-11"]
-"fabric.minecraft_version" = "26.1-alpha.11"
-"fabric.minecraft_version_range" = ">=26.1-alpha.7 <=26.1-alpha.11"
-elytratrims.version = "NLOF6eKu"
-geckolib.version = "yUpAp23B"
-iris.version = "MwcLS51S"
-emf.version = "3AWXQABp"
-etf.version = "pzW03Rc5"
-waveycapes.version = "K4cdp1K2"
-modmenu.version = "p7gjPPpV"
-gender.version = "VI0GA2EF"
-loader_version = "0.19.3"
-
-["fabric-26.1-pre-2"]
-"fabric.minecraft_version" = "26.1-pre.2"
-"fabric.minecraft_version_range" = "<=26.1-pre.2"
-elytratrims.version = "NLOF6eKu"
-geckolib.version = "yUpAp23B"
-iris.version = "MwcLS51S"
-emf.version = "3AWXQABp"
-etf.version = "pzW03Rc5"
-waveycapes.version = "K4cdp1K2"
-modmenu.version = "p7gjPPpV"
-gender.version = "VI0GA2EF"
-loader_version = "0.19.3"
-
-["fabric-26.1-rc-1"]
-"fabric.minecraft_version" = "26.1-rc.1"
-"fabric.minecraft_version_range" = "<=26.1-rc.2"
-elytratrims.version = "NLOF6eKu"
-geckolib.version = "yUpAp23B"
-iris.version = "MwcLS51S"
-emf.version = "3AWXQABp"
-etf.version = "pzW03Rc5"
-waveycapes.version = "K4cdp1K2"
-modmenu.version = "p7gjPPpV"
-gender.version = "VI0GA2EF"
-loader_version = "0.19.3"
-
-["fabric-26.1-rc-2"]
-"fabric.minecraft_version" = "26.1-rc.2"
-"fabric.minecraft_version_range" = "<=26.1-rc.2"
-elytratrims.version = "NLOF6eKu"
-geckolib.version = "yUpAp23B"
-iris.version = "MwcLS51S"
-emf.version = "3AWXQABp"
-etf.version = "pzW03Rc5"
-waveycapes.version = "K4cdp1K2"
-modmenu.version = "p7gjPPpV"
-gender.version = "VI0GA2EF"
-loader_version = "0.19.3"
 
 ["fabric-26.1.2"]
 "fabric.minecraft_version" = "26.1.2"
@@ -299,36 +226,12 @@ emf.version = "3AWXQABp"
 etf.version = "pzW03Rc5"
 waveycapes.version = "K4cdp1K2"
 modmenu.version = "p7gjPPpV"
-gender.version = "VI0GA2EF"
+gender.version = "VI0GA2EF" # 5.0.0-Beta.4
+firstperson.version = "PBg45FeB" # 2.7.2 (mc26.1 jar, covers 26.1/26.1.1/26.1.2)
 loader_version = "0.19.3"
 fabricapi.version = "WC1KT7Yg"
 fabricapi.semver = "0.153.0+26.1.2"
-
-["fabric-26.2-snapshot-3"]
-"fabric.minecraft_version" = "26.2-alpha.3"
-"fabric.minecraft_version_range" = ">=26.2-alpha.3 <=26.2-alpha.3"
-elytratrims.version = "NLOF6eKu"
-geckolib.version = "yUpAp23B"
-iris.version = "MwcLS51S"
-emf.version = "3AWXQABp"
-etf.version = "pzW03Rc5"
-waveycapes.version = "K4cdp1K2"
-modmenu.version = "A1KYIXpK"
-gender.version = "BGSsrIlj"
-loader_version = "0.19.3"
-
-["fabric-26.2-pre-1"]
-"fabric.minecraft_version" = "26.2-pre.1"
-"fabric.minecraft_version_range" = ">=26.2-"
-elytratrims.version = "NLOF6eKu"
-geckolib.version = "yUpAp23B"
-iris.version = "MwcLS51S"
-emf.version = "3AWXQABp"
-etf.version = "pzW03Rc5"
-waveycapes.version = "cp2elfPy"
-modmenu.version = "A1KYIXpK"
-gender.version = "BGSsrIlj"
-loader_version = "0.19.3"
+immersivearmors.version = "De0vtARW" # 1.8.1+26.1.2 fabric
 
 ["fabric-26.2"]
 "fabric.minecraft_version" = "26.2"
@@ -338,40 +241,48 @@ geckolib.version = "GdrAq4td"
 iris.version = "3uIIps8q"
 emf.version = "xQeW3qQB"
 etf.version = "HLCBKYFD"
-gender.version = "BGSsrIlj"
+fa.version = "RGIzA5em" # Fresh Animations 1.10.5 (resource pack, issue #217 repro)
+faplayer.version = "Wj7NeGjP" # FA Player Extension 1.1 (issue #217 repro)
+gender.version = "BGSsrIlj" # 5.0.0-Beta.4
+firstperson.version = "6sgz2HEq" # 2.7.2-26.2 (fabric-only; renders the local body in first person)
 loader_version = "0.19.3"
 waveycapes.version = "cp2elfPy"
 modmenu.version = "dTGuPZ91"
 fabricapi.version = "M8Kbv865"
-# Upstream fabric-api version_number — needed for loom's `fabricApi.module(...)` resolution
+# Upstream fabric-api version_number - needed for loom's `fabricApi.module(...)` resolution
 # of individual API modules off fabric maven (e.g. fabric-client-gametest-api-v1 for the
 # Phase 2 entity-render smoke test). Mirrors `fabricapi.version`'s Modrinth hash.
 fabricapi.semver = "0.153.0+26.2"
+immersivearmors.version = "8gIhM6R2" # 1.8.1+26.2 fabric
+armoredelytra.version = "IbMR9Ie6" # 1.14.1+26.2 fabric (dorkix); loaded on the compat=all FCGT row so the ArmoredElytraGenderSmokeTest exercises the mod-present branch
 
-["fabric-26.3-snapshot-5"]
-"fabric.minecraft_version" = "26.3-alpha.5"
-"fabric.minecraft_version_range" = ">=26.3-alpha.5 <=26.3-alpha.5"
+["fabric-26.3-snapshot-8"]
+"fabric.minecraft_version" = "26.3-alpha.8"
+"fabric.minecraft_version_range" = ">=26.3-alpha.8 <=26.3-alpha.8"
 elytratrims.version = "tKGLQKLD"
 geckolib.version = "GdrAq4td"
 iris.version = "3uIIps8q"
 emf.version = "xQeW3qQB"
 etf.version = "HLCBKYFD"
-gender.version = "BGSsrIlj"
+gender.version = "BGSsrIlj" # 5.0.0-Beta.4
 loader_version = "0.19.3"
 waveycapes.version = "cp2elfPy"
 modmenu.version = "dTGuPZ91"
 fabricapi.version = "1jpphFGE"
-# Upstream fabric-api version_number — needed for loom's `fabricApi.module(...)` resolution
+# Upstream fabric-api version_number - needed for loom's `fabricApi.module(...)` resolution
 # of individual API modules off fabric maven (e.g. fabric-client-gametest-api-v1 for the
 # Phase 2 entity-render smoke test). Mirrors `fabricapi.version`'s Modrinth hash.
-fabricapi.semver = "0.155.3+26.3"
+fabricapi.semver = "0.157.1+26.3"
 
 # ── NeoForge ──────────────────────────────────────────────────────────────────
 
 ["neoforge-1.21.1"]
-"neoforge.version" = "21.1.219"
+"neoforge.version" = "21.1.244"
 "neoforge.minecraft_version_range" = "[1.21,1.21.1]"
-geckolib.version = "UvKZBX05"
+geckolib.version = "tPkJmim6" # 4.9.2 (was UvKZBX05 / 4.5.8)
+deeperdarker.version = "TuD0Zvi3" # 1.21.1 neoforge (D&D 1.4.1 → WardenHelmetRenderer)
+deeperdarker.warden_class = "true"
+uranus.version = "1YdU56pR" # 2.4.1 neoforge (Ice and Fire: CE custom armor)
 elytratrims.version = "7mqA6CJO"
 iris.version = "t3ruzodq"
 emf.version = "PAYgk63v"
@@ -379,11 +290,13 @@ etf.version = "YEMROAHv"
 mekanism.version = "5KzzycBT"
 waveycapes.version = "uuX7ce0R"
 figura.version = "yXFi1fed"
-gender.version = "kKffHCGl"
+gender.version = "kKffHCGl" # 3.2.2
 # kKffHCGl ships only the legacy GenderLayer API (no GenderArmorLayer / BreastSide).
 # Routes the gender compat through GenderLegacyLayerMixin (coarse hide-cancel only;
 # no transparency or trim recolor on this combo).
 gender_legacy_api = "true"
+immersivearmors.version = "B2YtQYCh" # 1.7.6+1.21.1 neoforge
+curios.version = "yohfFbgD" # 9.5.1+1.21.1 neoforge
 
 ["neoforge-1.21.2"]
 "neoforge.version" = "21.2.1-beta"
@@ -403,7 +316,7 @@ gender.version = "kKffHCGl"
 gender_legacy_api = "true"
 
 ["neoforge-1.21.3"]
-"neoforge.version" = "21.3.96"
+"neoforge.version" = "21.3.97"
 "neoforge.minecraft_version_range" = "[1.21.3]"
 geckolib.version = "UvKZBX05"
 elytratrims.version = "7mqA6CJO"
@@ -420,18 +333,20 @@ gender.version = "kKffHCGl"
 gender_legacy_api = "true"
 
 ["neoforge-1.21.4"]
-"neoforge.version" = "21.4.156"
+"neoforge.version" = "21.4.157"
 "neoforge.minecraft_version_range" = "[1.21.4]"
 geckolib.version = "eQtABRub"
+curios.version = "jtt92CXj" # 10.0.1+1.21.4 neoforge
 iris.version = "FNc0XYTL"
 emf.version = "mSdGwbUW"
 etf.version = "prVeAFlr"
 waveycapes.version = "vjiRyyU7"
 
 ["neoforge-1.21.8"]
-"neoforge.version" = "21.8.52"
+"neoforge.version" = "21.8.54"
 "neoforge.minecraft_version_range" = "[1.21.5,1.21.8]"
 geckolib.version = "KPEgpbCC"
+curios.version = "UW476H0a" # 12.0.0+1.21.8 neoforge
 elytratrims.version = "RMLnPwtS"
 iris.version = "Rhzf61g1"
 emf.version = "hcT0GN6Q"
@@ -449,7 +364,7 @@ etf.version = "N8Hz5j7v"
 waveycapes.version = "U1F8UD8y"
 
 ["neoforge-1.21.11"]
-"neoforge.version" = "21.11.42"
+"neoforge.version" = "21.11.44"
 "neoforge.minecraft_version_range" = "[1.21.11]"
 geckolib.version = "FpONDAt3"
 elytratrims.version = "u2w6bgX3"
@@ -459,19 +374,21 @@ etf.version = "4czwwryO"
 waveycapes.version = "aurAWvjX"
 
 ["neoforge-26.1.2"]
-"neoforge.version" = "26.1.2.82"
+"neoforge.version" = "26.1.2.87"
 "neoforge.minecraft_version_range" = "[26.1,26.1.2]"
 geckolib.version = "ScUAwGRA"
 elytratrims.version = "wgUBgHvL"
 iris.version = "MwcLS51S"
 emf.version = "hABUrVHX"
 etf.version = "J8nN7dGg"
+immersivearmors.version = "1zKCa66X" # 1.8.1+26.1.2 neoforge
 
 ["neoforge-26.2"]
-"neoforge.version" = "26.2.0.6-beta"
+"neoforge.version" = "26.2.0.32-beta"
 "neoforge.minecraft_version_range" = "[26.2]"
 geckolib.version = "Y5jWG02T"
 elytratrims.version = "kHpKqNuJ"
 iris.version = "3uIIps8q"
 emf.version = "QxbPFvdn"
 etf.version = "NrV7O0NJ"
+immersivearmors.version = "hga2z8pc" # 1.8.1+26.2 neoforge

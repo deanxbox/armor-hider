@@ -37,9 +37,9 @@ import net.minecraft.world.item.equipment.trim.ArmorTrim;
 //?}
 
 //? if >= 26.1-0.snapshot {
-/*import org.apache.commons.lang3.mutable.MutableBoolean;
+import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.apache.commons.lang3.mutable.MutableInt;
-*///?}
+//?}
 
 //? if >= 1.21 && < 1.21.9 {
 /*import de.zannagh.armorhider.client.common.SlotModification;
@@ -82,14 +82,72 @@ public class GenderArmorLayerMixin {
     private static final String TRIM_METHOD = "renderArmorTrim";
 
     //? if >= 1.21.9 {
-    private Pair<Boolean, RenderInterceptionResult> ah$interceptArmor(HumanoidRenderState state, EquipmentSlot slot, ItemStack stack, CallbackInfo ci) {
+    // Armored Elytra (dorkix) compat. FGM's submit() reads the worn chest item, looks up its equipment
+    // asset and skips the breast armor when that asset has no humanoid layer. A dorkix armored elytra is
+    // a plain Items.ELYTRA (chestplate stashed in CUSTOM_DATA), whose asset is the elytra - no humanoid
+    // layer - so FGM never draws breast armor for it and it vanishes. Substitute the stored chestplate
+    // for that lookup (mirroring what the mod already does for HumanoidArmorLayer) so FGM draws the
+    // breast; Armor Hider's own breast hooks below then fade it per the chest opacity. Non-armored-elytra
+    // items are returned unchanged. require = 0 keeps us in step with the rest of this @Pseudo FGM compat
+    // (silent no-op if FGM's submit shape drifts); ArmoredElytraGenderSmokeTest pins the target.
+    // Armored Elytra (dorkix) compat, gate 2 of 2. FGM's submit() also skips the breast when the worn
+    // item's own equipment asset has no humanoid layer (getLayers(...).isEmpty()) - and a dorkix armored
+    // elytra is a plain Items.ELYTRA whose asset is wings-only. WildfireHelperMixin already makes FGM's
+    // armor config (coversBreasts/texture) resolve to the stored chestplate; this makes the equipment-asset
+    // check see it too, by substituting the chestplate's EQUIPPABLE for the elytra's at the lookup. Both
+    // gates must pass for the breast armor to render. Non-armored-elytra items pass through unchanged.
+    @WrapOperation(
+            method = "submit(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;ILnet/minecraft/client/renderer/entity/state/HumanoidRenderState;FF)V",
+            require = 0,
+            at = @At(value = "INVOKE",
+                    target = "Lnet/minecraft/world/item/ItemStack;get(Lnet/minecraft/core/component/DataComponentType;)Ljava/lang/Object;",
+                    remap = true)
+    )
+    private Object armorHider$armoredElytraEquippable(ItemStack instance, net.minecraft.core.component.DataComponentType<?> type, Operation<Object> original) {
+        if (type == net.minecraft.core.component.DataComponents.EQUIPPABLE) {
+            ItemStack chestplate = de.zannagh.armorhider.client.compat.ArmoredElytraCompat.underlyingChestplateOrSelf(instance);
+            if (chestplate != instance) {
+                return original.call(chestplate, type);
+            }
+        }
+        return original.call(instance, type);
+    }
+
+    private Pair<Boolean, RenderInterceptionResult> interceptArmor(HumanoidRenderState state, EquipmentSlot slot, ItemStack stack, CallbackInfo ci) {
+        // Combat detection is deliberately NOT short-circuited here. It arrives through the normal
+        // interception path: SlotModification.of applies CombatManager.transformTransparencyBasedOnCombat,
+        // which snaps the piece to full opacity when combat starts and ramps it back to the configured
+        // opacity over the combat window. At the snap the resolved transparency is 1.0, so
+        // needsModification() is false and interception no-ops on its own - the breast armor stays in
+        // lockstep with the vanilla body chestplate for free.
+        //
+        // Bailing out on shouldEnforceVanillaRendering() instead (as this did until the fade was wired
+        // into SlotModification) shadows that ramp: the piece rendered fully opaque for the whole combat
+        // window and then popped straight to hidden the moment the combat event expired, while every
+        // vanilla armor piece faded smoothly. shouldEnforceVanillaRendering() governs which *model* is
+        // used (EquipmentRenderMixin, EMF), not opacity, and has no meaning for the mod's own breast model.
+        //
+        // Armored Elytra (dorkix): the worn chest item is a plain Items.ELYTRA (chestplate stashed in
+        // CUSTOM_DATA), so its ItemInfo.isArmoredElytra() is false and the ARMOR_PIECE renderer would
+        // delegate this breast piece to the ELYTRA renderer - making its opacity follow opacityAffectElytra
+        // instead of the chest slot. But the breast armor IS the stored chestplate's armor (FGM resolves it
+        // via WildfireHelperMixin), and the vanilla body plate dorkix swaps into HumanoidArmorLayer already
+        // follows the chest opacity. Feed the interception the underlying chestplate so the breast is scoped
+        // as ARMOR_PIECE/chest and stays in lockstep with the body plate - e.g. with opacityAffectElytra OFF
+        // the chestplate hides yet the wings stay visible, which is the whole point of an armored elytra.
+        // Non-armored-elytra stacks (and a real chestplate) pass through unchanged.
+        ItemStack effectiveStack = de.zannagh.armorhider.client.compat.ArmoredElytraCompat.underlyingChestplateOrSelf(stack);
         var interceptionResult = AhRenderInterceptionRegistryApi
-                .getRenderer(RenderScope.ARMOR_PIECE).intercept(state, slot, stack, ci);
+                .getRenderer(RenderScope.ARMOR_PIECE).intercept(state, slot, effectiveStack, ci);
         if (!interceptionResult.shouldIntercept()) {
             return Pair.of(false, interceptionResult);
         }
         if (interceptionResult.shouldCancel()) {
-            AhRenderManagementApi.exitScope(RenderScope.ARMOR_PIECE);
+            // Exit BOTH scopes: an "armored elytra" (Elytra Armor datapack - an Items.ELYTRA that also
+            // carries a chestplate asset, so ItemInfo.isElytra() is true) makes the ARMOR_PIECE renderer
+            // delegate to the ELYTRA renderer, so the scope actually entered for this breast piece may be
+            // ELYTRA rather than ARMOR_PIECE. See the enter side in interceptBreastArmor.
+            AhRenderManagementApi.exitScopes(RenderScope.ARMOR_PIECE, RenderScope.ELYTRA);
             return Pair.of(false, interceptionResult);
         }
         return Pair.of(true, interceptionResult);
@@ -103,17 +161,17 @@ public class GenderArmorLayerMixin {
     @Inject(method = BREAST_METHOD, at = @At("HEAD"), cancellable = true)
     private void interceptBreastArmor(
             //? if >= 26.1-0.snapshot {
-            /*Identifier texture, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, BreastSide side, int color, MutableBoolean glint, MutableInt order,
-            *///? } elif >= 1.21.9 {
-            Identifier texture, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, BreastSide side, int color, boolean glint,
-            //? } elif >= 1.21 {
+            Identifier texture, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, BreastSide side, int color, MutableBoolean glint, MutableInt order,
+            //? } elif >= 1.21.9 {
+            /*Identifier texture, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, BreastSide side, int color, boolean glint,
+            *///? } elif >= 1.21 {
             /*Identifier texture, PoseStack poseStack, MultiBufferSource bufferSource, int light, @Coerce Object side, int color, boolean glint,
             *///? } else {
             /*Player player, PoseStack poseStack, MultiBufferSource bufferSource, ArmorItem armorItem, ItemStack itemStack, int light, boolean isLeft,
             *///?}
             CallbackInfo ci) {
         //? if >= 1.21.9 {
-        var interceptionResult = ah$interceptArmor(state, EquipmentSlot.CHEST, state.chestEquipment, ci);
+        var interceptionResult = interceptArmor(state, EquipmentSlot.CHEST, state.chestEquipment, ci);
         if (!interceptionResult.getFirst()) {
             return;
         }
@@ -142,16 +200,18 @@ public class GenderArmorLayerMixin {
     @Inject(method = BREAST_METHOD, at = @At("RETURN"))
     private void clearBreastArmorContext(
             //? if >= 26.1-0.snapshot {
-            /*Identifier texture, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, BreastSide side, int color, MutableBoolean glint, MutableInt order,
-            *///? } elif >= 1.21.9 {
-            Identifier texture, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, BreastSide side, int color, boolean glint,
-            //? } elif >= 1.21 {
+            Identifier texture, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, BreastSide side, int color, MutableBoolean glint, MutableInt order,
+            //? } elif >= 1.21.9 {
+            /*Identifier texture, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, BreastSide side, int color, boolean glint,
+            *///? } elif >= 1.21 {
             /*Identifier texture, PoseStack poseStack, MultiBufferSource bufferSource, int light, @Coerce Object side, int color, boolean glint,
             *///? } else {
             /*Player player, PoseStack poseStack, MultiBufferSource bufferSource, ArmorItem armorItem, ItemStack itemStack, int light, boolean isLeft,
             *///?}
             CallbackInfo ci) {
-        AhRenderManagementApi.exitScope(RenderScope.ARMOR_PIECE);
+        // Exit BOTH: for an "armored elytra" chest the breast piece is scoped as ELYTRA, not ARMOR_PIECE
+        // (see interceptArmor). Exiting only ARMOR_PIECE leaked the ELYTRA scope for the rest of the frame.
+        AhRenderManagementApi.exitScopes(RenderScope.ARMOR_PIECE, RenderScope.ELYTRA);
     }
 
     //? if >= 1.21 {
@@ -164,7 +224,7 @@ public class GenderArmorLayerMixin {
     )
     private int modifyBreastArmorColor(int i, Operation<Integer> original) {
         int opaqueColor = original.call(i);
-        return AhRenderManagementApi.getActiveScope(RenderScope.ARMOR_PIECE).renderModificationApi().applyArmorTransparency(opaqueColor);
+        return AhRenderManagementApi.getActiveScope(RenderScope.ARMOR_PIECE, RenderScope.ELYTRA).renderModificationApi().applyArmorTransparency(opaqueColor);
     }
     //?}
 
@@ -183,7 +243,7 @@ public class GenderArmorLayerMixin {
     *///?}
 
     //? if >= 26.1-0.snapshot.1 {
-    /*@WrapOperation(
+    @WrapOperation(
             method = BREAST_METHOD,
             require = 0,
             at = @At(value = "INVOKE",
@@ -191,17 +251,18 @@ public class GenderArmorLayerMixin {
                     remap = true)
     )
     private RenderType modifyBreastArmorRenderType(Identifier texture, Operation<RenderType> original) {
-        var modApi = AhRenderManagementApi.getActiveScope(RenderScope.ARMOR_PIECE).renderModificationApi();
+        var modApi = AhRenderManagementApi.getActiveScope(RenderScope.ARMOR_PIECE, RenderScope.ELYTRA).renderModificationApi();
         var originalType = original.call(texture);
-        if (modApi.getTranslucentArmorRenderType(texture, originalType) instanceof RenderType rt) {
+        if (modApi.getTranslucentArmorRenderType(texture, originalType) instanceof RenderType rt && rt != originalType) {
+            de.zannagh.armorhider.client.render.rendertype.ArmorHiderRenderTypes.recordBreastArmorTranslucentSwap();
             return rt;
         }
         return originalType;
     }
-    *///?}
+    //?}
 
     //? if >= 1.21.9 && < 26.1-0.snapshot.1 {
-    @WrapOperation(
+    /*@WrapOperation(
             method = BREAST_METHOD,
             require = 0,
             at = @At(value = "INVOKE",
@@ -209,14 +270,14 @@ public class GenderArmorLayerMixin {
                     remap = true)
     )
     private RenderType modifyBreastArmorRenderType(Identifier texture, Operation<RenderType> original) {
-        var modApi = AhRenderManagementApi.getActiveScope(RenderScope.ARMOR_PIECE).renderModificationApi();
+        var modApi = AhRenderManagementApi.getActiveScope(RenderScope.ARMOR_PIECE, RenderScope.ELYTRA).renderModificationApi();
         var originalType = original.call(texture);
         if (modApi.getTranslucentArmorRenderType(texture, originalType) instanceof RenderType rt) {
             return rt;
         }
         return originalType;
     }
-    //?}
+    *///?}
 
     //? if < 1.21.9 {
     /*@WrapOperation(
@@ -260,17 +321,17 @@ public class GenderArmorLayerMixin {
     @Inject(method = TRIM_METHOD, at = @At("HEAD"), cancellable = true)
     private void interceptArmorTrim(
             //? if >= 26.1-0.snapshot {
-            /*ResourceKey<EquipmentAsset> armorModel, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, ArmorTrim trim, BreastSide side, MutableInt order,
-            *///? } elif >= 1.21.9 {
-            ResourceKey<EquipmentAsset> armorModel, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, ArmorTrim trim, BreastSide side, boolean glint,
-            //? } elif >= 1.21 {
+            ResourceKey<EquipmentAsset> armorModel, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, ArmorTrim trim, BreastSide side, MutableInt order,
+            //? } elif >= 1.21.9 {
+            /*ResourceKey<EquipmentAsset> armorModel, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, ArmorTrim trim, BreastSide side, boolean glint,
+            *///? } elif >= 1.21 {
             /*@Coerce Object armorModel, PoseStack poseStack, MultiBufferSource bufferSource, int light, @Coerce Object trim, boolean glint, @Coerce Object side,
             *///? } else {
             /*ArmorMaterial material, PoseStack poseStack, MultiBufferSource bufferSource, int light, ArmorTrim trim, boolean glint, boolean isLeft,
             *///?}
             CallbackInfo ci) {
         //? if >= 1.21.9 {
-        var interceptionResult = ah$interceptArmor(state, EquipmentSlot.CHEST, state.chestEquipment, ci);
+        var interceptionResult = interceptArmor(state, EquipmentSlot.CHEST, state.chestEquipment, ci);
         if (!interceptionResult.getFirst()) {
             return;
         }
@@ -297,16 +358,16 @@ public class GenderArmorLayerMixin {
     @Inject(method = TRIM_METHOD, at = @At("RETURN"))
     private void clearArmorTrimContext(
             //? if >= 26.1-0.snapshot {
-            /*ResourceKey<EquipmentAsset> armorModel, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, ArmorTrim trim, BreastSide side, MutableInt order,
-            *///? } elif >= 1.21.9 {
-            ResourceKey<EquipmentAsset> armorModel, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, ArmorTrim trim, BreastSide side, boolean glint,
-            //? } elif >= 1.21 {
+            ResourceKey<EquipmentAsset> armorModel, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, ArmorTrim trim, BreastSide side, MutableInt order,
+            //? } elif >= 1.21.9 {
+            /*ResourceKey<EquipmentAsset> armorModel, PoseStack poseStack, SubmitNodeCollector collector, HumanoidRenderState state, ArmorTrim trim, BreastSide side, boolean glint,
+            *///? } elif >= 1.21 {
             /*@Coerce Object armorModel, PoseStack poseStack, MultiBufferSource bufferSource, int light, @Coerce Object trim, boolean glint, @Coerce Object side,
             *///? } else {
             /*ArmorMaterial material, PoseStack poseStack, MultiBufferSource bufferSource, int light, ArmorTrim trim, boolean glint, boolean isLeft,
             *///?}
             CallbackInfo ci) {
-        AhRenderManagementApi.exitScope(RenderScope.ARMOR_PIECE);
+        AhRenderManagementApi.exitScopes(RenderScope.ARMOR_PIECE, RenderScope.ELYTRA);
     }
 
     //? if >= 1.21.9 {
@@ -319,7 +380,7 @@ public class GenderArmorLayerMixin {
     )
     private RenderType modifyTrimRenderType(boolean decal, Operation<RenderType> original) {
         return AhRenderManagementApi
-                .getActiveScope(RenderScope.ARMOR_PIECE).renderModificationApi()
+                .getActiveScope(RenderScope.ARMOR_PIECE, RenderScope.ELYTRA).renderModificationApi()
                 .renderTypes().getTranslucentArmorTrimRenderType(decal);
     }
     //?}
@@ -347,7 +408,7 @@ public class GenderArmorLayerMixin {
     // ========================
 
     //? if >= 1.21.9 && < 26.1-0.snapshot {
-    @Inject(method = "renderGlint", at = @At("HEAD"), cancellable = true)
+    /*@Inject(method = "renderGlint", at = @At("HEAD"), cancellable = true)
     private void interceptGlint(PoseStack poseStack, SubmitNodeCollector queue,
             HumanoidRenderState state, @Coerce Object box, CallbackInfo ci) {
         if (!(state instanceof IdentityCarrier carrier)) return;
@@ -357,6 +418,6 @@ public class GenderArmorLayerMixin {
             ci.cancel();
         }
     }
-    //?}
+    *///?}
 }
 //?}

@@ -64,7 +64,7 @@ public abstract class SkullBlockRenderMixin {
         }
         // Short-circuit on !needsModification, not just isEmpty: the scope is non-empty whenever
         // a slot modification is in effect (even for full opacity). When nothing needs to change
-        // we want the exact vanilla call — not the rebuilt submit with a priority reorder below —
+        // we want the exact vanilla call - not the rebuilt submit with a priority reorder below -
         // so full-opacity skulls keep their original render path untouched.
         if (!headCtx.needsModification()) {
             //? if >= 26.3-0.snapshot.2 {
@@ -101,7 +101,7 @@ public abstract class SkullBlockRenderMixin {
     @Unique
     private static RenderType ah$applyLayer(Identifier texture, RenderType original) {
         // A null texture reaches here from resolveSkullRenderType's getSkullRenderType(type, null)
-        // call — the real texture is resolved *inside* getSkullRenderType (handled by
+        // call - the real texture is resolved *inside* getSkullRenderType (handled by
         // getCutoutRenderLayer). Building a translucent type from a null texture would NPE the
         // memoize cache, so leave it to the inner wrap.
         if (texture == null) {
@@ -156,10 +156,10 @@ public abstract class SkullBlockRenderMixin {
             at = @At(
                     value = "INVOKE",
                     //? if >= 26.1-0.snapshot.6 {
-                    /*target = "Lnet/minecraft/client/renderer/rendertype/RenderTypes;entityCutoutZOffset(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/renderer/rendertype/RenderType;"
-                    *///? } elif >= 1.21.11 {
-                    target = "Lnet/minecraft/client/renderer/rendertype/RenderTypes;entityCutoutNoCullZOffset(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/renderer/rendertype/RenderType;"
-                    //? } else {
+                    target = "Lnet/minecraft/client/renderer/rendertype/RenderTypes;entityCutoutZOffset(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/renderer/rendertype/RenderType;"
+                    //? } elif >= 1.21.11 {
+                    /*target = "Lnet/minecraft/client/renderer/rendertype/RenderTypes;entityCutoutNoCullZOffset(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/renderer/rendertype/RenderType;"
+                    *///? } else {
                     /*target = "Lnet/minecraft/client/renderer/rendertype/RenderType;entityCutoutNoCullZOffset(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/renderer/rendertype/RenderType;"
                     *///? }
             )

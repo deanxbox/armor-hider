@@ -25,8 +25,14 @@ public class ExclusionItemConfiguration {
     /**
      * Slot name → item registry ID → exclusion info.
      * Uses String keys for both slot and item to ensure clean GSON serialization.
+     * <p>
+     * Declared as concrete {@link LinkedHashMap} at both levels on purpose: Gson honours a concrete field
+     * type and constructs {@code LinkedHashMap}s on deserialize, so iteration follows insertion (discovery)
+     * order that {@link #prune()} relies on. Left as the {@code Map} interface, Gson would instead build its
+     * own {@code LinkedTreeMap}; that happens to iterate in insertion order today, but pinning the type keeps
+     * the guarantee from silently depending on a Gson internal across the wide MC/Gson version range we build.
      */
-    Map<String, Map<String, ExclusionItemInfo>> items = new LinkedHashMap<>();
+    LinkedHashMap<String, LinkedHashMap<String, ExclusionItemInfo>> items = new LinkedHashMap<>();
 
     /**
      * Caches Item → registry ID lookups so that non-registry or slow lookups
@@ -47,10 +53,21 @@ public class ExclusionItemConfiguration {
      */
     public ExclusionItemConfiguration deepCopy() {
         var copy = new ExclusionItemConfiguration();
-        for (Map.Entry<String, Map<String, ExclusionItemInfo>> slotEntry : items.entrySet()) {
+        if (items == null) {
+            return copy;
+        }
+        // Null-tolerant: this is reached from ConfigPreset#applyTo/#fromPlayerConfig, whose exclusion map is
+        // read out of armor-hider-presets.json by plain Gson and never passes through PlayerConfig.heal().
+        for (var slotEntry : items.entrySet()) {
+            if (slotEntry.getKey() == null || slotEntry.getValue() == null) {
+                continue;
+            }
             var slotCopy = new LinkedHashMap<String, ExclusionItemInfo>();
             for (Map.Entry<String, ExclusionItemInfo> itemEntry : slotEntry.getValue().entrySet()) {
                 ExclusionItemInfo orig = itemEntry.getValue();
+                if (itemEntry.getKey() == null || orig == null) {
+                    continue;
+                }
                 slotCopy.put(itemEntry.getKey(), new ExclusionItemInfo(orig.displayName, orig.shouldIgnore));
             }
             copy.items.put(slotEntry.getKey(), slotCopy);
@@ -71,19 +88,23 @@ public class ExclusionItemConfiguration {
      * Items not in the list default to NOT ignored (mod handles them).
      */
     public boolean shouldArmorHiderIgnore(EquipmentSlot slot, Item item) {
-        String itemId = getItemId(item);
-        Map<String, ExclusionItemInfo> slotItems = items.get(slot.name());
-        if (slotItems == null) return false;
-        ExclusionItemInfo info = slotItems.get(itemId);
-        if (info == null) return false;
-        return info.shouldIgnore;
+        // Routed through getItemsForSlot so it inherits the same null-safety: a corrupt "items": null (in a
+        // config or preset that has not yet been through prune()/heal()) must not NPE a render-path lookup.
+        ExclusionItemInfo info = getItemsForSlot(slot).get(getItemId(item));
+        return info != null && info.shouldIgnore;
     }
 
     /**
      * Returns all items configured for a given slot.
      */
     public Map<String, ExclusionItemInfo> getItemsForSlot(EquipmentSlot slot) {
-        return items.getOrDefault(slot.name(), Map.of());
+        if (items == null) {
+            return Map.of();
+        }
+        // getOrDefault returns a *stored* null rather than the fallback, so an explicit "HEAD": null in the
+        // JSON would otherwise hand callers a null map.
+        Map<String, ExclusionItemInfo> slotItems = items.get(slot.name());
+        return slotItems != null ? slotItems : Map.of();
     }
 
     /**
@@ -104,6 +125,87 @@ public class ExclusionItemConfiguration {
         if (info == null) return null;
         info.shouldIgnore = !info.shouldIgnore;
         return info.shouldIgnore;
+    }
+
+    /** Prefix of the synthetic IDs minted by {@link #getItemId} when a registry lookup fails. */
+    public static final String SYNTHETIC_ID_PREFIX = "unknown:";
+
+    /**
+     * Maximum number of discovered (non user-configured) entries retained per slot. Entries the user has
+     * explicitly excluded are always kept and do not count against this budget.
+     */
+    public static final int MAX_DISCOVERED_ITEMS_PER_SLOT = 512;
+
+    /**
+     * Drops entries that can never match again and bounds the rest, returning the number of repairs made
+     * (entries removed, plus one if a null backing map had to be materialised) - a non-zero result signals
+     * the caller to persist the cleaned-up form.
+     * <p>
+     * Two problems are repaired here:
+     * <ul>
+     *   <li><b>Synthetic IDs.</b> {@link #getItemId} falls back to {@code "unknown:<class>_<identityHashCode>"}
+     *       for items missing from the registry. Identity hash codes are not stable across JVM runs, so every
+     *       launch mints fresh keys for the same items and the map grows without bound. None of these keys can
+     *       ever be matched again, so they are pure garbage.</li>
+     *   <li><b>Unbounded discovery.</b> {@link #discoverItem} appends every equipped item ever rendered, for
+     *       every player seen. On a busy modded server that is effectively unbounded.</li>
+     * </ul>
+     * The backing map is a {@link LinkedHashMap} at both levels (see the {@link #items} field note), so
+     * iteration follows insertion (discovery) order and trimming drops the oldest discovered entries first -
+     * and that holds across a save/reload, not just for a freshly-built instance.
+     */
+    public synchronized int prune() {
+        // This map is deserialized reflectively by Gson - unlike ConfigurationItem fields it is NOT covered
+        // by ConfigurationSourceSerializer#initializeNullConfigFields - so explicit JSON nulls survive into
+        // it verbatim. Since prune() is the repair pass called from PlayerConfig.heal(), it must treat those
+        // nulls as more corruption to clean up rather than tripping over them: an NPE here propagates out of
+        // deserialize() into PlayerConfigFileProvider's catch-all, which discards the whole config and writes
+        // defaults - turning "heal the config" into "silently wipe the config".
+        int removed = 0;
+        if (items == null) {
+            items = new LinkedHashMap<>();
+            // Count the materialisation as a repair so the caller persists the fixed form. Returning 0 here
+            // would let an "items": null corruption be re-read and re-repaired on every launch, never written
+            // back, since PlayerConfig.heal() only flags the config dirty when prune() reports > 0.
+            return 1;
+        }
+
+        var slotIterator = items.entrySet().iterator();
+        while (slotIterator.hasNext()) {
+            var slotEntry = slotIterator.next();
+            Map<String, ExclusionItemInfo> slotItems = slotEntry.getValue();
+            if (slotEntry.getKey() == null || slotItems == null) {
+                slotIterator.remove();
+                removed++;
+                continue;
+            }
+
+            // Drop corrupt entries and synthetic identity-hash IDs in one pass.
+            var itemIterator = slotItems.entrySet().iterator();
+            while (itemIterator.hasNext()) {
+                Map.Entry<String, ExclusionItemInfo> itemEntry = itemIterator.next();
+                String itemId = itemEntry.getKey();
+                if (itemId == null || itemEntry.getValue() == null || itemId.startsWith(SYNTHETIC_ID_PREFIX)) {
+                    itemIterator.remove();
+                    removed++;
+                }
+            }
+
+            // Anything the user deliberately excluded is intent worth preserving, so only the passively
+            // discovered remainder is subject to the cap.
+            var discoveredKeys = new java.util.ArrayList<String>();
+            for (Map.Entry<String, ExclusionItemInfo> itemEntry : slotItems.entrySet()) {
+                if (!itemEntry.getValue().shouldIgnore) {
+                    discoveredKeys.add(itemEntry.getKey());
+                }
+            }
+            int excess = discoveredKeys.size() - MAX_DISCOVERED_ITEMS_PER_SLOT;
+            for (int i = 0; i < excess; i++) {
+                slotItems.remove(discoveredKeys.get(i));
+                removed++;
+            }
+        }
+        return removed;
     }
 
     /**
@@ -155,7 +257,7 @@ public class ExclusionItemConfiguration {
                 ArmorHider.LOGGER.warn("Failed to resolve registry ID for item {}: {}", i, e.getMessage());
             }
             // Fallback for items not in the registry
-            return "unknown:" + i.getClass().getSimpleName().toLowerCase() + "_" + System.identityHashCode(i);
+            return SYNTHETIC_ID_PREFIX + i.getClass().getSimpleName().toLowerCase() + "_" + System.identityHashCode(i);
         });
     }
 

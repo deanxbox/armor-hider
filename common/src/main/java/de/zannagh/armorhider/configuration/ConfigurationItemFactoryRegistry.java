@@ -30,6 +30,8 @@ public class ConfigurationItemFactoryRegistry {
         registerFactoriesForClass(DisableArmorHiderGlobally.class);
         registerFactoriesForClass(ForceArmorHiderOffOnPlayers.class);
         registerFactoriesForClass(OpacityAffectingElytraItem.class);
+        registerFactoriesForClass(ElytraOpacity.class);
+        registerFactoriesForClass(ElytraInFlight.class);
         registerFactoriesForClass(OpacityAffectingHatOrSkullItem.class);
         registerFactoriesForClass(AffectAccessories.class);
         registerFactoriesForClass(AffectHeadAccessory.class);
@@ -43,6 +45,7 @@ public class ConfigurationItemFactoryRegistry {
         registerFactoriesForClass(EnableGlint.class);
         registerFactoriesForClass(ShowSettingsInSkinCustomization.class);
         registerFactoriesForClass(InCombatUseDefaultArmorSkin.class);
+        registerFactoriesForClass(HiddenModelBehaviour.class);
         registerFactoriesForClass(ShowShieldWhenBlocking.class);
         registerFactoriesForClass(DisableArmorHiderOnInvisibility.class);
         registerFactoriesForClass(DisableArmorHiderOnInvisibilityGlobally.class);
@@ -50,6 +53,11 @@ public class ConfigurationItemFactoryRegistry {
         registerFactoriesForClass(IndividualConfigurations.class);
         registerFactoriesForClass(ServerMappedIndividualConfigurations.class);
         registerFactoriesForClass(UseGlobalOverrideForAllPlayers.class);
+        registerFactoriesForClass(SettingsScreenLocation.class);
+        registerFactoriesForClass(IrisTransparencyMode.class);
+        registerFactoriesForClass(IrisDitheringScale.class);
+        registerFactoriesForClass(IrisDitherPhases.class);
+        registerFactoriesForClass(IrisDitherResCap.class);
 
         initialized = true;
     }

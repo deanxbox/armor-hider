@@ -1,19 +1,10 @@
 name: "CodeQL"
 
 on:
-  push:
-    branches:
-      - "main"
-      - 'release/**'
-    paths-ignore:
-      - '**/*.md'
-      - '**/*.txt'
-      - '**/*.png'
-      - '**/*.yml'
+  workflow_dispatch:
   pull_request:
     branches:
       - "main"
-      - 'release/**'
     paths-ignore:
       - '**/*.md'
       - '**/*.txt'
@@ -23,14 +14,8 @@ on:
     - cron: '16 20 * * 1'
 
 jobs:
-  check-runner:
-    name: Check Runner
-    uses: ./.github/workflows/check-runner.yml
-    secrets: inherit
-
   analyze:
     name: Analyze (${{ matrix.language }})
-    needs: check-runner
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -50,26 +35,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Gradle Environment
-        uses: zannagh/versionizer/setup-gradle-env@v1
-        with:
-          java-distribution: 'microsoft'
-
-      - name: Cache NeoForge NFRT Artifacts
-        uses: actions/cache@v6
-        with:
-          path: neoforge/versions/*/build/moddev/artifacts/
-          key: nfrt-${{ runner.os }}-${{ hashFiles('neoforge/versions/*/gradle.properties') }}
-
+      # build-mode: none extracts straight from source - no compiler, no Gradle. The repo is Java
+      # only (the sole Kotlin is buildSrc Gradle logic, which `none` skips and which carries nothing
+      # worth scanning), so this analyses every one of the 288 Java sources with none of the cost of
+      # a traced build. If shipped Kotlin is ever added, switch this back to a traced build (drop
+      # build-mode, restore a Gradle compile step) so kotlinc gets traced.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-
-      - name: Build
-        run: ./gradlew build
+          build-mode: ${{ matrix.build-mode }}
+          # Default suite is security-only and deliberately narrow; security-and-quality adds the
+          # maintainability/quality query family so the code-scanning overview reflects both. Quality
+          # queries work fully on source, so they pair well with build-mode: none. (The deepest
+          # dataflow security queries would benefit from a traced build that resolves deps, but for a
+          # client-side mod the source-only extraction is an acceptable trade.)
+          queries: security-and-quality
+          # Excludes noisy-but-signal-free quality queries (e.g. java/unused-parameter,
+          # which every mixin injection handler trips). See the config for rationale.
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{matrix.language}}"
+          upload: true

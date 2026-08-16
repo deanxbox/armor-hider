@@ -11,7 +11,7 @@ import org.lwjgl.glfw.GLFW;
 
 public class LoadPresetKeyMapping extends CustomKeyMapping {
 
-    // Left-Alt is uncommon among vanilla defaults. GLFW keycodes only — an AWT VK
+    // Left-Alt is uncommon among vanilla defaults. GLFW keycodes only - an AWT VK
     // value here would mis-map; VK_UNDEFINED (0) in particular collides with the
     // number-row "0" key (both named "key.keyboard.0").
     //? if >= 26.3-0.snapshot.5 {
@@ -28,16 +28,21 @@ public class LoadPresetKeyMapping extends CustomKeyMapping {
         instance = this;
     }
 
+    // This mapping is a hold-modifier, not a press-action: the work happens in tick() while the key
+    // is held down, so a press on its own does nothing.
     @Override
-    public void onKeyDown() {}
-
-    @Override
-    public void onKeyUp() {
-        activatedWhileHeld = -1;
-    }
+    protected void armorHider$onActivated() {}
 
     public static void tick() {
-        if (instance == null || !instance.isDown()) {
+        if (instance == null) {
+            return;
+        }
+        // isDown() is the right state to read for a hold-modifier, and it is safe to read: vanilla
+        // clears it via releaseAll() when a screen opens and restores it via setAll() when one
+        // closes. Resetting here (rather than from a setDown override) keeps the latch honest on
+        // both paths and on every OS.
+        if (!instance.isDown()) {
+            instance.activatedWhileHeld = -1;
             return;
         }
         var mc = Minecraft.getInstance();
