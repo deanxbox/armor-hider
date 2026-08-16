@@ -68,6 +68,9 @@ public class ETElytraTrimSubmitMixin {
                                                       int color, TextureAtlasSprite sprite, int outline,
                                                       ModelFeatureRenderer.CrumblingOverlay crumblingOverlay,
                                                       Operation<Void> original) {
+        // Count every ET trim submit that reaches our wrap (before any scope check) - the "ET is drawing
+        // a decorator through the helper we target" signal the smoke test keys off.
+        de.zannagh.armorhider.client.render.rendertype.ArmorHiderRenderTypes.recordElytraTrimSeen();
         var ctx = AhRenderManagementApi.getActiveScope(RenderScope.ELYTRA);
         if (ctx.isEmpty() || !ctx.needsModification()) {
             original.call(collector, model, state, poseStack, renderType, light, overlay, color, sprite, outline, crumblingOverlay);
@@ -79,13 +82,20 @@ public class ETElytraTrimSubmitMixin {
         /*boolean etDrawsTranslucent = false; // 1.21.9/1.21.10 ET draws trims cutout
         *///?}
         if (etDrawsTranslucent) {
-            // ET already blends (26.x): fade by scaling alpha, keep ET's translucent type.
+            // ET already blends (>= 1.21.11): fade by scaling alpha, keep ET's translucent type - the trim
+            // fades in lockstep with the wing.
             var modApi = ctx.renderModificationApi();
             int modifiedColor = modApi.colors().scaleAlpha(color, modApi.getTransparencyAlpha());
+            de.zannagh.armorhider.client.render.rendertype.ArmorHiderRenderTypes.recordElytraTrimFade();
             original.call(collector, model, state, poseStack, renderType, light, overlay, modifiedColor, sprite, outline, crumblingOverlay);
+        } else {
+            // ET draws cutout, which can't be alpha-blended (a translucent swap renders its atlas flat
+            // blue). We do NOT hide it here: hiding a trim at partial opacity would change the render, and
+            // the policy on cutout versions is "full at 5-100%, hidden only at 0%". On those versions
+            // ArmorHiderElytraRenderer already collapses so this scope isn't even entered at partial;
+            // reaching here (a cutout ET on a translucent-era MC) means: leave the trim exactly as ET drew.
+            original.call(collector, model, state, poseStack, renderType, light, overlay, color, sprite, outline, crumblingOverlay);
         }
-        // else: ET draws cutout; a translucent swap renders its atlas flat blue, so hide the trim while
-        // the wing is faded by not forwarding the submit. Full opacity is handled by the early return above.
     }
 }
 //?}
